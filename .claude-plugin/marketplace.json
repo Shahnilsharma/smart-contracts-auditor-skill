@@ -10,21 +10,24 @@
   "plugins": [
     {
       "name": "cosmwasm-defi-architect",
-      "source": "./skills/cosmwasm-defi-architect",
+      "source": "./skills",
+      "skills": ["cosmwasm-defi-architect"],
       "description": "Full-stack CosmWasm smart contract architect for Cosmos-based chains. Default: ZIGChain.",
       "category": "security",
       "tags": ["cosmwasm", "cosmos", "zigchain", "smart-contract", "audit", "defi"]
     },
     {
       "name": "evm-defi-architect",
-      "source": "./skills/evm-defi-architect",
+      "source": "./skills",
+      "skills": ["evm-defi-architect"],
       "description": "Full-stack Solidity/EVM smart contract architect. Default: Ethereum mainnet/Sepolia.",
       "category": "security",
       "tags": ["solidity", "evm", "ethereum", "smart-contract", "audit", "defi", "foundry", "hardhat"]
     },
     {
       "name": "solana-defi-architect",
-      "source": "./skills/solana-defi-architect",
+      "source": "./skills",
+      "skills": ["solana-defi-architect"],
       "description": "Full-stack Solana program (Anchor) architect. Default: devnet.",
       "category": "security",
       "tags": ["solana", "anchor", "smart-contract", "audit", "defi"]
