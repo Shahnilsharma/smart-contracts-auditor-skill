@@ -33,12 +33,16 @@ defi-audit-suite/
 │   ├── cosmwasm-defi-architect.skill
 │   ├── evm-defi-architect.skill
 │   └── solana-defi-architect.skill
+├── plugins/                       # generated — mirrors skills/<name>/ one level deeper, for /plugin install only
+│   ├── cosmwasm-defi-architect/   # (Claude Code's plugin loader only scans <source>/skills/, never source root)
+│   ├── evm-defi-architect/
+│   └── solana-defi-architect/
 └── multi-agent/
     ├── claude-code-agent-teams/   # real parallel teammates via Claude Code Agent Teams
     └── portable-role-spec/        # framework-agnostic version (CrewAI/LangGraph/AutoGen/OpenAI SDK/ADK)
 ```
 
-Each `skills/<chain>-defi-architect/` folder is internally identical in shape: `SKILL.md` (the pipeline), `.claude-plugin/plugin.json` (a per-skill plugin manifest, kept for standalone/direct plugin installs — the `/plugin install ...@defi-audit-suite` marketplace path below is driven by `.claude-plugin/marketplace.json` at the repo root, which points at `./skills` and selects each skill by name), `references/*.md` (chain defaults, coding standards, testing patterns, static-analysis commands, the audit checklist, the shared `agency-audit-methodology.md`, `team-mode.md` for self-contained team mode, and `report-template.md` for professional report formatting — title page, severity color conventions, `docx` skill usage notes), `scripts/*` (wallet setup, deploy commands), and `evals/` — `evals.json` (6 test cases: build, audit-existing, team-mode, near-miss, wrong-chain-negative, adversarial-pressure), `fixtures/` (small intentionally-flawed contracts used by the audit-existing case), and `ground-truth/` (the exact planted vulnerabilities in each fixture, each with a FAIL_TO_PASS/PASS_TO_PASS test pair, labeled for precision/recall scoring — see `EVAL-METHODOLOGY.md`).
+Each `skills/<chain>-defi-architect/` folder is internally identical in shape: `SKILL.md` (the pipeline), `.claude-plugin/plugin.json` (a per-skill plugin manifest), `references/*.md` (chain defaults, coding standards, testing patterns, static-analysis commands, the audit checklist, the shared `agency-audit-methodology.md`, `team-mode.md` for self-contained team mode, and `report-template.md` for professional report formatting — title page, severity color conventions, `docx` skill usage notes), `scripts/*` (wallet setup, deploy commands), and `evals/` — `evals.json` (6 test cases: build, audit-existing, team-mode, near-miss, wrong-chain-negative, adversarial-pressure), `fixtures/` (small intentionally-flawed contracts used by the audit-existing case), and `ground-truth/` (the exact planted vulnerabilities in each fixture, each with a FAIL_TO_PASS/PASS_TO_PASS test pair, labeled for precision/recall scoring — see `EVAL-METHODOLOGY.md`).
 
 ---
 
@@ -123,7 +127,7 @@ Don't assume — check. `INTEGRATION-CHECK.md` gives a mechanical check per tool
 ## Publishing this repo — GitHub, and "should I submit it to a store"
 
 **GitHub, step by step:**
-1. Before pushing: replace the placeholder in `.claude-plugin/marketplace.json` (`owner.name`) and in each `skills/<name>/.claude-plugin/plugin.json` (`author.name`) — currently `REPLACE-WITH-YOUR-NAME-OR-ORG`. Run `./check_dist_matches_source.sh` afterward — it validates these files (and everything else) automatically.
+1. Before pushing: replace the placeholder in `.claude-plugin/marketplace.json` (`owner.name`) and in each `skills/<name>/.claude-plugin/plugin.json` (`author.name`) — currently `REPLACE-WITH-YOUR-NAME-OR-ORG`. Then copy each edited `plugin.json` into its `plugins/<name>/.claude-plugin/plugin.json` counterpart too (that's what the marketplace actually installs from — see the `plugins/` note above). Run `./check_dist_matches_source.sh` afterward — it validates all of this (including `plugins/` drift) automatically.
 2. `git init && git add -A && git commit -m "initial" && git push` to a new GitHub repo (public, if you want others to install it).
 3. That's it for the Claude Code plugin-marketplace path above — `/plugin marketplace add <you>/<repo>` works the moment the repo is public on GitHub, no release/tag needed.
 4. **Optional, for the fastest possible download of just one skill without cloning**: create a GitHub Release and attach the 3 files from `dist/*.skill` as release assets. Anyone can then download a single `.skill` file directly from the Releases page and upload it via their Claude surface's UI — no `git clone`, no terminal at all.

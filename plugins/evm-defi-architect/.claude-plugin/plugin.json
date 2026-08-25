@@ -1,0 +1,8 @@
+{
+  "name": "evm-defi-architect",
+  "version": "1.0.0",
+  "description": "Full-stack Solidity/EVM smart contract architect — scope/threat-model, code, test (Foundry+Hardhat), audit, deploy. Default chain: Ethereum mainnet/Sepolia, accepts any EVM chain via a docs URL or .md param.",
+  "author": {
+    "name": "REPLACE-WITH-YOUR-NAME-OR-ORG"
+  }
+}

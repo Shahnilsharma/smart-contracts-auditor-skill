@@ -53,6 +53,43 @@ fi
 echo ""
 echo "All dist/*.skill files match their skills/ source."
 
+# --- plugins/<name>/skills/ drift check ---
+# plugins/<name>/ is a generated wrapper that nests each skill one level deeper
+# (plugins/<name>/skills/SKILL.md) so Claude Code's plugin-marketplace loader can find it —
+# it only ever scans <plugin-source>/skills/, never the source root itself. skills/<name>/
+# stays flat (SKILL.md at its own root) because install.sh and dist/*.skill both depend on
+# that flat shape. Keep both in sync by hand; this catches silent drift between them.
+echo ""
+echo "=== Checking plugins/<name>/skills/ matches skills/<name>/ (excluding evals/) ==="
+for name in cosmwasm-defi-architect evm-defi-architect solana-defi-architect; do
+  plugin_dir="plugins/${name}/skills"
+  src_dir="skills/${name}"
+  if [ ! -d "$plugin_dir" ]; then
+    echo "FAIL: $plugin_dir does not exist"
+    FAIL=1
+    continue
+  fi
+  if diff -rq -x evals -x .claude-plugin "$src_dir" "$plugin_dir" > "$TMP/${name}.plugin.diff" 2>&1; then
+    echo "OK: $plugin_dir matches $src_dir"
+  else
+    echo "FAIL: $plugin_dir has drifted from $src_dir"
+    cat "$TMP/${name}.plugin.diff"
+    FAIL=1
+  fi
+  # plugin.json is copied separately (it lives one level up from skills/ in plugins/<name>/)
+  # — diff it explicitly so an author/version edit in skills/<name>/ doesn't silently drift.
+  if ! diff -q "skills/${name}/.claude-plugin/plugin.json" "plugins/${name}/.claude-plugin/plugin.json" > /dev/null 2>&1; then
+    echo "FAIL: plugins/${name}/.claude-plugin/plugin.json has drifted from skills/${name}/.claude-plugin/plugin.json"
+    FAIL=1
+  fi
+done
+if [ "$FAIL" -ne 0 ]; then
+  echo ""
+  echo "plugins/ drift detected — re-copy SKILL.md/references/scripts/plugin.json from"
+  echo "skills/<name>/ into plugins/<name>/ and re-run this check."
+  exit 1
+fi
+
 # --- Triplicated shared-file drift check ---
 # agency-audit-methodology.md and references/team-mode.md are intentionally duplicated
 # byte-for-byte across all 3 skills (each skill must be self-contained — it can't reach
@@ -198,6 +235,19 @@ for p in d.get("plugins", []):
     plugin_json = os.path.join(resolved, ".claude-plugin", "plugin.json")
     if not os.path.isfile(plugin_json):
         print(f"FAIL: plugin '{name}' missing {plugin_json}")
+        fail = True
+    # Claude Code's plugin loader only ever discovers skills under <source>/skills/ —
+    # either <source>/skills/SKILL.md directly, or <source>/skills/<subdir>/SKILL.md.
+    # A plugin whose source points at a folder with SKILL.md at its own root (no "skills"
+    # wrapper) installs with 0 skills and no error — this caught that exact regression.
+    skills_dir = os.path.join(resolved, "skills")
+    direct = os.path.isfile(os.path.join(skills_dir, "SKILL.md"))
+    nested = os.path.isdir(skills_dir) and any(
+        os.path.isfile(os.path.join(skills_dir, d, "SKILL.md"))
+        for d in os.listdir(skills_dir) if os.path.isdir(os.path.join(skills_dir, d))
+    )
+    if not (direct or nested):
+        print(f"FAIL: plugin '{name}' source '{src}' has no discoverable SKILL.md under {skills_dir} — installs with 0 skills")
         fail = True
 if fail:
     sys.exit(1)

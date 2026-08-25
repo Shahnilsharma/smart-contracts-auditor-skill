@@ -1,0 +1,8 @@
+{
+  "name": "solana-defi-architect",
+  "version": "1.0.0",
+  "description": "Full-stack Solana program (Anchor) architect — scope/threat-model, code, test (LiteSVM/Mollusk/Surfpool/Trident), audit, deploy. Default cluster: devnet.",
+  "author": {
+    "name": "REPLACE-WITH-YOUR-NAME-OR-ORG"
+  }
+}
