@@ -1,0 +1,101 @@
+# Portable multi-agent role spec for the DeFi audit pipeline
+# Framework-agnostic: this is a plain description of roles, dependencies, and
+# inputs/outputs. It's not runnable by itself — pair with ADAPTING-OTHER-FRAMEWORKS.md
+# to wire it into whichever orchestrator you're using (CrewAI, LangGraph, AutoGen/AG2,
+# OpenAI Agents SDK, Google ADK, or a custom harness).
+
+pipeline_name: defi-audit-pipeline
+chain_param: "{{chain}}"   # one of: cosmwasm, evm, solana — resolves which skill/references dir to read
+skill_path: "skills/{{chain}}-defi-architect/"
+
+roles:
+  - id: architect
+    goal: >
+      Scope the engagement, build a threat model and impact x likelihood risk matrix,
+      rate key/upgrade-authority compromise resilience, and produce the architecture doc.
+    reads:
+      - "{{skill_path}}/SKILL.md"
+      - "{{skill_path}}/references/agency-audit-methodology.md"
+      - "{{skill_path}}/references/*chain-defaults*.md"
+    produces: architecture_doc
+    depends_on: []
+
+  - id: contract_engineer
+    goal: >
+      Implement the contract/program against architecture_doc, following the chain's
+      coding-standards reference exactly.
+    reads:
+      - "{{skill_path}}/references/coding-standards*.md"
+      - architecture_doc
+    produces: contract_source
+    depends_on: [architect]
+
+  # NOTE on `reads` paths below: filenames genuinely differ per chain — there is no
+  # single glob or fixed filename that resolves correctly for all three skills. Resolve
+  # {{chain}} to the real per-chain reference file using this table before reading:
+  #   cosmwasm : references/qa-runner.md            (no separate static-analysis.md —
+  #              static-analysis guidance lives inline in SKILL.md step 6)
+  #   evm      : references/testing-foundry.md AND references/testing-hardhat.md
+  #              (both — this skill uses two files, not one), references/static-analysis.md
+  #   solana   : references/testing-solana.md
+  #              (no separate static-analysis.md — lives inline in SKILL.md step 6)
+  # An orchestrator implementation MUST read the target skill's own SKILL.md reference
+  # list first (each SKILL.md enumerates its actual reference filenames) rather than
+  # assuming a fixed glob resolves — treat the paths below as illustrative, not literal.
+
+  - id: qa_fuzzer
+    goal: >
+      Write and run unit, fuzz, and invariant tests plus the role-based QA runner,
+      targeting the properties in architecture_doc's risk matrix.
+    reads:
+      - "{{skill_path}}/SKILL.md"   # enumerates the real testing reference filename(s) for {{chain}} — resolve from there, see note above
+      - contract_source
+      - architecture_doc
+    produces: qa_results
+    depends_on: [contract_engineer]
+    parallel_with: [static_analyst]
+
+  - id: static_analyst
+    goal: >
+      Run and triage automated static/dynamic analysis tooling for the target chain;
+      every finding classified true-positive/false-positive/accepted-risk. On chains
+      without a dedicated static-analysis.md (CosmWasm, Solana), this guidance lives
+      inline in that chain's SKILL.md — read the "Static analysis" step there instead.
+    reads:
+      - "{{skill_path}}/SKILL.md"   # points to references/static-analysis.md on EVM only; inline guidance elsewhere — see goal above
+      - contract_source
+    produces: triaged_findings
+    depends_on: [contract_engineer]
+    parallel_with: [qa_fuzzer]
+
+  - id: auditor
+    goal: >
+      Run the manual audit checklist and economic/game-theoretic review; write the
+      final report with impact x likelihood severity per finding and an explicit
+      scope/assumptions section.
+    reads:
+      - "{{skill_path}}/references/audit-checklist.md"
+      - "{{skill_path}}/references/agency-audit-methodology.md"
+      - architecture_doc
+      - qa_results
+      - triaged_findings
+    produces: audit_report
+    depends_on: [qa_fuzzer, static_analyst]
+
+  - id: fix_reviewer
+    goal: >
+      After patches land, verify each fix closes the reported issue and didn't
+      introduce a new one; assign a resolution status per finding.
+    reads:
+      - audit_report
+      - contract_source   # post-patch version
+    produces: fix_review_report
+    depends_on: [auditor]
+    activation: manual   # only run this after the user has actually patched findings
+
+communication_pattern: >
+  Any role may message any other role directly to resolve an ambiguity rather than
+  guessing (e.g. auditor -> architect to re-rate a risk given a confirmed finding;
+  static_analyst -> qa_fuzzer to request a targeted test for a suspected issue).
+  If your framework doesn't support direct inter-agent messaging, route these through
+  the orchestrator/supervisor node instead and accept the extra latency.

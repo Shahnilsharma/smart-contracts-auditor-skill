@@ -1,0 +1,42 @@
+# Secrets — every wallet-setup doc in this repo says "never commit these"; this is what
+# actually enforces it. If you're seeing this file for the first time in an existing repo
+# that already committed a key, rotate that key — a .gitignore added after the fact does not
+# remove history.
+.env
+.env.*
+!.env.example
+*.pem
+*_MNEMONIC
+keys/
+*.keystore
+*keyring-test*
+*keyring-file*
+
+# EVM / Foundry / Hardhat
+out/
+cache/
+cache_hardhat/
+artifacts/
+broadcast/
+node_modules/
+.env.local
+
+# CosmWasm / Rust
+target/
+Cargo.lock
+artifacts/*.wasm
+
+# Solana / Anchor
+.anchor/
+test-ledger/
+target/
+*.so
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Multi-agent / Claude Code local state
+.claude/settings.local.json

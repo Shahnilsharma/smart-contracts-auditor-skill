@@ -1,0 +1,33 @@
+{
+  "name": "defi-audit-suite",
+  "owner": {
+    "name": "REPLACE-WITH-YOUR-NAME-OR-ORG"
+  },
+  "metadata": {
+    "description": "Full-stack smart-contract architect + auditor skills for Cosmos/CosmWasm, EVM/Solidity, and Solana — scope/threat-model, code, test, audit, deploy, all following an agency-grade methodology. See README.md.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "cosmwasm-defi-architect",
+      "source": "./skills/cosmwasm-defi-architect",
+      "description": "Full-stack CosmWasm smart contract architect for Cosmos-based chains. Default: ZIGChain.",
+      "category": "security",
+      "tags": ["cosmwasm", "cosmos", "zigchain", "smart-contract", "audit", "defi"]
+    },
+    {
+      "name": "evm-defi-architect",
+      "source": "./skills/evm-defi-architect",
+      "description": "Full-stack Solidity/EVM smart contract architect. Default: Ethereum mainnet/Sepolia.",
+      "category": "security",
+      "tags": ["solidity", "evm", "ethereum", "smart-contract", "audit", "defi", "foundry", "hardhat"]
+    },
+    {
+      "name": "solana-defi-architect",
+      "source": "./skills/solana-defi-architect",
+      "description": "Full-stack Solana program (Anchor) architect. Default: devnet.",
+      "category": "security",
+      "tags": ["solana", "anchor", "smart-contract", "audit", "defi"]
+    }
+  ]
+}

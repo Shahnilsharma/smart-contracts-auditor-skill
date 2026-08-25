@@ -1,0 +1,65 @@
+{
+  "fixture": "fixtures/Pool.sol",
+  "description": "Ground-truth vulnerability list for the Pool.sol eval fixture. A finding 'counts' as matching one of these only if it identifies the same location AND the same underlying issue \u2014 a correct category with the wrong location, or a vague restatement of the code without the specific mechanism, does not count as a match. Use with evals/evals.json eval #2 and EVAL-METHODOLOGY.md's Layer 3 scoring.",
+  "vulnerabilities": [
+    {
+      "id": "POOL-1",
+      "category": "Reentrancy",
+      "severity": "Critical",
+      "location": "swap(), lines 60-69",
+      "description": "External calls (tIn.transferFrom, tOut.transfer) happen before reserveA/reserveB are updated \u2014 checks-effects-interactions violation. A malicious or non-standard token (e.g. one with an ERC-777-style hook, or simply a reentrant fallback via tOut.transfer to a contract) can re-enter swap() while reserves still reflect the pre-swap state, manipulating the price used by the reentrant call.",
+      "why_planted": "The single most severe, most classic EVM finding \u2014 tests whether the audit actually traces call order rather than pattern-matching on function names.",
+      "difficulty": "moderate",
+      "date_added": "2026-07-29",
+      "verified": {
+        "status": true,
+        "method": "Reviewed against checks-effects-interactions ordering by inspection of the actual call sequence in swap() (external calls at lines 60-61 precede state writes at lines 63-69) \u2014 not executed against a live deployment, but the ordering itself is directly readable and unambiguous, which is what 'verified' means for a hand-crafted fixture per EVAL-METHODOLOGY.md's Verified-tier discussion."
+      },
+      "fail_to_pass": {
+        "description": "A malicious ERC-20-like token used as tokenB has a transfer() override that re-enters Pool.swap() once, mid-call, before the legitimate swap's reserve update. The test checks the REAL invariant \u2014 that the pool's actual token balance never drops below reserveA+reserveB after any sequence of calls \u2014 not merely 'did a revert happen', per the SWE-ABS lesson that shallow revert-only tests let wrong fixes pass.",
+        "test_code": "// forge test \u2014 evals/fixtures/PoolReentrancy.t.sol (written here, NOT executed \u2014 see step 0.5 discipline)\n// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\nimport \"forge-std/Test.sol\";\nimport \"../fixtures/Pool.sol\";\n\ncontract MaliciousToken is IERC20 {\n    Pool public pool;\n    bool public reentered;\n    // ... standard ERC20 storage/balanceOf/approve omitted for brevity ...\n    function transfer(address to, uint256 amount) external returns (bool) {\n        if (!reentered && msg.sender == address(pool)) {\n            reentered = true;\n            // Re-enter swap() while Pool's reserveA/reserveB still reflect the PRE-swap\n            // state (the vulnerable window) \u2014 this is the actual exploit, not a revert probe.\n            pool.swap(address(this), 1);\n        }\n        _balances[to] += amount;\n        return true;\n    }\n    // ...\n}\n\ncontract PoolReentrancyTest is Test {\n    function test_reentrancy_cannotDrainBeyondRealBalance() public {\n        // setup: deploy Pool with a normal tokenA and a MaliciousToken as tokenB,\n        // fund both, addLiquidity normally, then have an attacker call swap()\n        // with tokenB, triggering the malicious transfer() reentrant path.\n        // ...\n        uint256 poolTokenABalanceAfter = tokenA.balanceOf(address(pool));\n        uint256 poolTokenBBalanceAfter = tokenB.balanceOf(address(pool));\n        // THE REAL INVARIANT (not 'did it revert'): the pool must never be left holding\n        // less than its own recorded reserves claim \u2014 that's what 'drained via reentrancy'\n        // actually means, and it's what a shallow revert-only test would miss entirely if\n        // the reentrant call happens to succeed without reverting.\n        assertGe(poolTokenABalanceAfter, pool.reserveA(), \"pool reserveA exceeds actual balance -- drained\");\n        assertGe(poolTokenBBalanceAfter, pool.reserveB(), \"pool reserveB exceeds actual balance -- drained\");\n    }\n}\n",
+        "expected_before_fix": "FAILS \u2014 reentrant swap() call executes against stale reserves, and the invariant assertions catch the resulting reserve/balance mismatch even if no explicit revert occurred anywhere in the call chain.",
+        "expected_after_fix": "PASSES once swap() is rewritten checks-effects-interactions-correctly (state updated before external calls) or gains a reentrancy guard \u2014 the reentrant call then either reverts (nonReentrant) or operates against already-updated, consistent reserves."
+      },
+      "pass_to_pass": "The fixture's own basic addLiquidity()/swap() happy-path behavior (non-malicious tokens, single-call swaps) must continue to produce the correct amountOut per the constant-product formula after any reentrancy fix \u2014 a fix that breaks normal swaps to stop the exploit (e.g. blocking all external calls) is not an acceptable fix."
+    },
+    {
+      "id": "POOL-2",
+      "category": "Input validation / MEV",
+      "severity": "High",
+      "location": "swap(), line 49 signature \u2014 no minAmountOut parameter",
+      "description": "swap() computes amountOut from live reserves with no caller-supplied minimum-acceptable-output check, so any swap can be sandwiched (frontrun to move the price unfavorably, then backrun) with no way for the caller to bound their slippage.",
+      "why_planted": "Tests whether MEV/slippage-protection is checked as its own category, not folded generically into 'input validation'."
+    },
+    {
+      "id": "POOL-3",
+      "category": "Business logic \u2014 first-depositor / donation attack",
+      "severity": "Medium",
+      "location": "addLiquidity(), line 39 (totalLp == 0 branch)",
+      "description": "No minimum-liquidity lock on the first deposit. The first LP can deposit a trivial amount, then a direct token donation to the pool (transfer without calling addLiquidity) before a second LP's deposit can manipulate the effective share price the second LP receives, since lpMinted for subsequent deposits is calculated from reserveA which the direct donation inflated without minting corresponding LP shares.",
+      "why_planted": "Tests whether the audit goes beyond the single-function view and reasons about a multi-step economic attack, per Phase 6's composed-exploit-chain guidance in agency-audit-methodology.md."
+    },
+    {
+      "id": "POOL-4",
+      "category": "Unchecked external calls",
+      "severity": "Medium",
+      "location": "addLiquidity() lines 36-37, swap() lines 60-61",
+      "description": "Raw .transferFrom()/.transfer() calls, not SafeERC20, and no check of the boolean return value \u2014 a non-standard ERC-20 that returns false instead of reverting on failure would silently fail to move tokens while the function proceeds as if the transfer succeeded.",
+      "why_planted": "A specific, checklist-named category (references/audit-checklist.md 'Unchecked external calls' / 'Unchecked ERC-20 return values') \u2014 tests whether the checklist is actually applied line-by-line, not just the headline categories."
+    },
+    {
+      "id": "POOL-5",
+      "category": "Input validation",
+      "severity": "Low",
+      "location": "addLiquidity() and swap(), no zero-amount guard",
+      "description": "Neither function rejects a zero amountA/amountB/amountIn \u2014 a no-op call still emits a misleading event and (for addLiquidity with totalLp==0) could mint zero LP tokens in a way that leaves totalLp==0 unexpectedly if amountA is also zero, an edge case not otherwise guarded.",
+      "why_planted": "A low-severity, easy-to-miss boundary-value case \u2014 tests recall on findings that don't jump out as dramatic."
+    }
+  ],
+  "not_a_vulnerability_but_might_be_flagged": [
+    {
+      "note": "Access control is intentionally NOT a finding here \u2014 there's no admin/privileged role in this fixture, so an audit that reports a generic 'access control' finding without a specific unauthorized-access scenario is a false positive, not a genuine miss on this fixture's part."
+    }
+  ],
+  "schema_version": "2.0 (adds difficulty/date_added/verified/fail_to_pass/pass_to_pass per EVAL-METHODOLOGY.md's SWE-bench-inspired upgrade)"
+}

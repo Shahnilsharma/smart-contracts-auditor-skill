@@ -1,0 +1,49 @@
+{
+  "fixture": "fixtures/lending.rs",
+  "description": "Ground-truth vulnerability list for the lending.rs (CosmWasm) eval fixture. A finding 'counts' as matching one of these only if it identifies the same location AND the same underlying issue. Use with evals/evals.json eval #2 and EVAL-METHODOLOGY.md's Layer 3 scoring.",
+  "vulnerabilities": [
+    {
+      "id": "CWLEND-1",
+      "category": "Missing balance check (Funds handling)",
+      "severity": "Critical",
+      "location": "execute_withdraw(), lines 64-72",
+      "description": "`amount` is never checked against DEPOSITS[info.sender] (or any per-user record) before being subtracted from cfg.total_deposits \u2014 any caller can call Withdraw with an arbitrary amount and it will be accepted, corrupting the contract's global accounting state regardless of what that caller actually deposited. Compounding this: execute_withdraw never updates the DEPOSITS map at all (only deposit() does), so even a naive per-user check added later would need a second, separate bug fixed alongside it.",
+      "why_planted": "The most severe finding \u2014 mirrors LEND-1 in the Solana fixture and POOL-3-adjacent business-logic-gap findings in the EVM fixture, deliberately, to test whether an audit catches this class of bug consistently across chains rather than only when it matches a chain-specific checklist item verbatim.",
+      "difficulty": "moderate",
+      "date_added": "2026-07-29",
+      "verified": {
+        "status": true,
+        "method": "Confirmed by inspection: execute_withdraw() reads `amount` directly from the ExecuteMsg with no lookup against DEPOSITS.load(deps.storage, &info.sender) anywhere in the function body \u2014 directly readable, not inferred."
+      },
+      "fail_to_pass": {
+        "description": "cw-multitest integration test: a caller who never deposited anything calls Withdraw with an arbitrary amount. Tests the REAL invariant \u2014 that the contract's recorded total_deposits accounting cannot be corrupted by a caller with no recorded deposit \u2014 not just 'did the call return an error', per the SWE-ABS lesson.",
+        "test_code": "// cw-multitest \u2014 evals/fixtures/lending_drain_test.rs (written here, NOT executed \u2014 see step 0.5 discipline)\nuse cosmwasm_std::{Uint128, coins};\nuse cw_multi_test::{App, ContractWrapper, Executor};\n\n#[test]\nfn test_withdraw_without_deposit_corrupts_accounting() {\n    let mut app = App::default();\n    let code = ContractWrapper::new(execute, instantiate, query);\n    let code_id = app.store_code(Box::new(code));\n    let contract_addr = app.instantiate_contract(\n        code_id, Addr::unchecked(\"admin\"), &InstantiateMsg {}, &[], \"lending\", None,\n    ).unwrap();\n\n    // Honest depositor deposits 1000 uzig.\n    app.execute_contract(\n        Addr::unchecked(\"honest_depositor\"), contract_addr.clone(),\n        &ExecuteMsg::Deposit {}, &coins(1000, \"uzig\"),\n    ).unwrap();\n\n    let total_before: Config = app.wrap().query_wasm_smart(&contract_addr, &()).unwrap();\n    assert_eq!(total_before.total_deposits, Uint128::new(1000));\n\n    // Attacker who deposited nothing calls Withdraw for 1000 uzig -- their own deposit\n    // record (which doesn't exist) is never consulted.\n    let result = app.execute_contract(\n        Addr::unchecked(\"attacker\"), contract_addr.clone(),\n        &ExecuteMsg::Withdraw { amount: Uint128::new(1000) }, &[],\n    );\n\n    // THE REAL INVARIANT: total_deposits accounting must not be reduced by a caller who\n    // never contributed to it -- checking result.is_err() alone is insufficient, since\n    // the exploit's whole point is that the call currently SUCCEEDS and silently corrupts\n    // the accounting (whether or not real bank funds also move is a separate question --\n    // see the fixture's own 'not_a_vulnerability_but_might_be_flagged' note).\n    let total_after: Config = app.wrap().query_wasm_smart(&contract_addr, &()).unwrap();\n    assert!(\n        result.is_err() || total_after.total_deposits == total_before.total_deposits,\n        \"attacker with zero deposits reduced total_deposits from {} to {}\",\n        total_before.total_deposits, total_after.total_deposits\n    );\n}\n",
+        "expected_before_fix": "FAILS \u2014 the call succeeds and total_deposits drops by 1000 even though the attacker never deposited anything.",
+        "expected_after_fix": "PASSES once execute_withdraw() loads DEPOSITS[info.sender], checks amount against it, and rejects the call for an attacker with no recorded deposit (or a deposit smaller than the requested amount)."
+      },
+      "pass_to_pass": "An honest depositor withdrawing an amount they actually deposited must continue to succeed after any fix \u2014 a fix that blocks all withdrawals is not an acceptable fix."
+    },
+    {
+      "id": "CWLEND-2",
+      "category": "Arithmetic \u2014 unchecked operators on Uint128",
+      "severity": "Medium",
+      "location": "execute_deposit() line 49 (`cfg.total_deposits += sent`) and execute_withdraw() line 66 (`cfg.total_deposits - amount`)",
+      "description": "Both use raw operators instead of `checked_add`/`checked_sub` on Uint128, contrary to references/coding-standards.md's explicit rule. Uint128's arithmetic panics on overflow/underflow rather than silently wrapping, so this isn't a silent-wrap vulnerability, but it is still a correctness/DoS concern (an uncontrolled panic aborts the tx with a less informative error than an explicit checked-op's typed error) and a direct violation of this suite's own stated coding standard for the chain.",
+      "why_planted": "Tests whether 'unchecked arithmetic' findings are reported even when the concrete exploit impact is more about error-handling quality than direct fund loss \u2014 distinguishing this from CWLEND-1, which does have direct fund/accounting-integrity impact."
+    },
+    {
+      "id": "CWLEND-3",
+      "category": "State consistency / accounting divergence",
+      "severity": "Medium",
+      "location": "execute_withdraw(), entire function \u2014 DEPOSITS map never touched",
+      "description": "deposit() updates both CONFIG.total_deposits and DEPOSITS[sender]; withdraw() only updates CONFIG.total_deposits, never DEPOSITS[sender]. Even independent of CWLEND-1, this means the two storage structures can never be reconciled \u2014 DEPOSITS becomes a monotonically-increasing-only record that no longer reflects actual outstanding balances after any withdrawal.",
+      "why_planted": "Tests whether an audit reasons about state *consistency* across the full set of storage-mutating branches, not just each branch's arithmetic in isolation \u2014 a distinct skill from CWLEND-1/2."
+    }
+  ],
+  "not_a_vulnerability_but_might_be_flagged": [
+    {
+      "note": "There's no BankMsg::Send anywhere in execute_withdraw \u2014 funds never actually leave the contract's bank balance despite the accounting change. This is arguably a functional bug (withdraw doesn't work) more than a security vulnerability per se, since it doesn't enable fund theft \u2014 it just means the fixture's accounting can be corrupted without real-world fund loss as written. An audit that flags this as informational/low ('withdraw doesn't transfer funds \u2014 likely incomplete rather than exploitable') should be treated as a correct, bonus observation, not scored against CWLEND-1/2/3."
+    }
+  ],
+  "schema_version": "2.0 (adds difficulty/date_added/verified/fail_to_pass/pass_to_pass per EVAL-METHODOLOGY.md's SWE-bench-inspired upgrade)"
+}

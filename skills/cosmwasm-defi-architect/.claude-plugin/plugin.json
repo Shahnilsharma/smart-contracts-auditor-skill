@@ -1,0 +1,8 @@
+{
+  "name": "cosmwasm-defi-architect",
+  "version": "1.0.0",
+  "description": "Full-stack CosmWasm smart contract architect for Cosmos-based chains — scope/threat-model, code, test, audit, deploy. Default chain: ZIGChain, accepts any Cosmos chain via a docs URL or .md param.",
+  "author": {
+    "name": "REPLACE-WITH-YOUR-NAME-OR-ORG"
+  }
+}

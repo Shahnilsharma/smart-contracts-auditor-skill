@@ -1,0 +1,49 @@
+{
+  "fixture": "fixtures/lib.rs",
+  "description": "Ground-truth vulnerability list for the lib.rs (Anchor lending) eval fixture. A finding 'counts' as matching one of these only if it identifies the same location AND the same underlying issue. Use with evals/evals.json eval #2 and EVAL-METHODOLOGY.md's Layer 3 scoring.",
+  "vulnerabilities": [
+    {
+      "id": "LEND-1",
+      "category": "Missing balance/authorization check (business-logic access gap)",
+      "severity": "Critical",
+      "location": "withdraw(), lines 28-36",
+      "description": "There is no per-user deposit record anywhere in this program, and withdraw() never checks the caller-supplied `amount` against anything the caller actually deposited. Any signer can call withdraw with an arbitrary amount up to pool_vault's full lamport balance and drain it, since the only account required is a valid Signer, not proof of having deposited that amount.",
+      "why_planted": "The most severe finding \u2014 a real fund-drain, and one that's easy to miss if an audit only checks Solana's classic signer/owner-check categories (which are technically satisfied here \u2014 `user` IS correctly a Signer) without also checking whether business logic actually authorizes the amount. Tests whether the audit goes beyond the sealevel-attacks checklist mechanics into what the checklist's own 'Coverage traceability' section calls out as beyond-canonical-list territory.",
+      "difficulty": "moderate",
+      "date_added": "2026-07-29",
+      "verified": {
+        "status": true,
+        "method": "Confirmed by inspection: withdraw()'s Accounts struct requires only Signer<'info> for `user`, with no per-user deposit-record account in scope at all \u2014 there is no account the instruction could check a balance against even if it wanted to. This is directly readable from the account struct, not merely inferred."
+      },
+      "fail_to_pass": {
+        "description": "LiteSVM unit test: attacker who never deposited anything calls withdraw() for an amount equal to the full pool_vault balance. Tests the REAL invariant \u2014 attacker's lamport balance actually increased by stolen funds \u2014 not just 'did the instruction return Ok', per the SWE-ABS lesson.",
+        "test_code": "// LiteSVM test \u2014 evals/fixtures/lending_drain_test.rs (written here, NOT executed \u2014 see step 0.5 discipline)\nuse litesvm::LiteSVM;\nuse solana_sdk::{signature::Keypair, signer::Signer, transaction::Transaction};\n\n#[test]\nfn test_withdraw_without_deposit_drains_vault() {\n    let mut svm = LiteSVM::new();\n    let program_id = /* lending program id */;\n    svm.add_program_from_file(program_id, \"target/deploy/lending.so\").unwrap();\n\n    let honest_depositor = Keypair::new();\n    let attacker = Keypair::new();\n    svm.airdrop(&honest_depositor.pubkey(), 10_000_000_000).unwrap();\n    svm.airdrop(&attacker.pubkey(), 1_000_000_000).unwrap(); // attacker funds tx fees only\n\n    // ... initialize_pool, honest_depositor deposits 5_000_000_000 lamports ...\n    let attacker_balance_before = svm.get_balance(&attacker.pubkey()).unwrap();\n\n    // Attacker calls withdraw() for the pool's full vault balance, having deposited nothing.\n    let withdraw_ix = /* build withdraw instruction, amount = full pool_vault balance, signer = attacker */;\n    let tx = Transaction::new_signed_with_payer(&[withdraw_ix], Some(&attacker.pubkey()), &[&attacker], svm.latest_blockhash());\n    let result = svm.send_transaction(tx);\n\n    let attacker_balance_after = svm.get_balance(&attacker.pubkey()).unwrap();\n    // THE REAL INVARIANT: an attacker who deposited nothing must not walk away with more\n    // lamports than they started with (minus fees) -- checking result.is_err() alone is\n    // insufficient, since the exploit's whole point is that the instruction SUCCEEDS.\n    assert!(\n        attacker_balance_after <= attacker_balance_before,\n        \"attacker balance increased from {} to {} with zero prior deposit -- fund drain\",\n        attacker_balance_before, attacker_balance_after\n    );\n}\n",
+        "expected_before_fix": "FAILS \u2014 the instruction succeeds (LiteSVM's send_transaction returns Ok) and the attacker's balance increases by the stolen amount, even though no signer/owner check was technically violated.",
+        "expected_after_fix": "PASSES once withdraw() requires and checks a per-user deposit-record account (e.g. a PDA seeded by [b\"deposit\", user.key()]) and rejects amount > recorded balance \u2014 the transaction should then fail for an attacker with no deposit record."
+      },
+      "pass_to_pass": "An honest depositor withdrawing an amount they actually deposited must continue to succeed and receive exactly that amount after any fix \u2014 a fix that blocks all withdrawals (e.g. removing the instruction) is not an acceptable fix."
+    },
+    {
+      "id": "LEND-2",
+      "category": "Account data matching / PDA misuse \u2014 unvalidated pool_vault",
+      "severity": "High",
+      "location": "Deposit and Withdraw account structs, lines 67-69 and 78-80",
+      "description": "pool_vault is typed as a raw AccountInfo with only a `#[account(mut)]` constraint \u2014 no seeds/bump tying it to this specific pool, and no owner check. A caller can pass an arbitrary account as pool_vault in either deposit or withdraw, directing funds to/from an unrelated account rather than this pool's actual vault.",
+      "why_planted": "Directly exercises Sealevel Attacks category #1 (account data matching) and #7/#8 (bump seed canonicalization / PDA sharing) \u2014 added to the checklist specifically after the external review found these were missing as standalone items; this fixture is what should catch a regression if that checklist coverage is ever weakened."
+    },
+    {
+      "id": "LEND-3",
+      "category": "Arithmetic \u2014 unchecked subtraction",
+      "severity": "Medium",
+      "location": "withdraw(), line 30 (`pool.total_deposits -= amount`)",
+      "description": "Raw `-=` rather than `checked_sub`, unlike deposit() which correctly uses `checked_add` (line 42) \u2014 inconsistent arithmetic discipline within the same file. Given LEND-1's lack of a balance check, this can underflow if amount exceeds total_deposits, which Anchor/Rust will panic on in a debug build but could behave differently depending on the release/overflow-checks configuration \u2014 either way, an explicit checked_sub with a proper error is the correct pattern, matching what deposit() already does correctly.",
+      "why_planted": "Tests whether an audit that already caught LEND-1 also catches the secondary, related-but-distinct arithmetic issue rather than stopping at the first finding in a function."
+    }
+  ],
+  "not_a_vulnerability_but_might_be_flagged": [
+    {
+      "note": "Missing signer check is NOT the right category for LEND-1, even though it's the program's most severe issue \u2014 `user` is correctly typed as Signer<'info> throughout. A finding that mislabels LEND-1 as 'missing signer check' rather than 'missing balance/authorization check' should be scored as a near-miss (right severity, wrong category) not a full match."
+    }
+  ],
+  "schema_version": "2.0 (adds difficulty/date_added/verified/fail_to_pass/pass_to_pass per EVAL-METHODOLOGY.md's SWE-bench-inspired upgrade)"
+}
