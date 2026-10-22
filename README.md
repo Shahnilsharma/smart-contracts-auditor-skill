@@ -90,7 +90,7 @@ Every finding a skill produces is rated by **impact × likelihood**, not impact 
 
 **Claude Code — genuinely one command, no clone, no script** (this repo is a plugin marketplace):
 ```
-/plugin marketplace add <your-username>/<this-repo-name>
+/plugin marketplace add Shahnilsharma/smart-contracts-auditor-skill
 /plugin install evm-defi-architect@defi-audit-suite
 ```
 (swap `evm-defi-architect` for `cosmwasm-defi-architect` or `solana-defi-architect`, or run all three). If you're publishing your own fork, see "Publishing this repo" below — set `.claude-plugin/marketplace.json`'s `owner.name` and every `plugin.json`'s `author.name` to your own name first.
@@ -103,11 +103,28 @@ Every finding a skill produces is rated by **impact × likelihood**, not impact 
 ./install.sh --codex solana            # just Solana, this project's Codex
 ./install.sh --to /custom/path evm     # anywhere else
 ```
-Not for **claude.ai** (the browser chat interface) — there's no shell there. For that, and as the fastest option generally if you don't want a terminal at all: take the matching file from `dist/*.skill` and use your Claude surface's "upload/add skill" UI directly — already validated and packaged with Anthropic's own `package_skill.py`, nothing further to do.
+Not for **claude.ai** (the browser chat interface) — there's no shell there. For that, and as the fastest option generally if you don't want a terminal at all: take the matching file from `dist/*.skill` and use your Claude surface's "upload/add skill" UI directly — already packaged, and `./check_dist_matches_source.sh` confirms each one matches its `skills/` source — nothing further to do.
 
 For any other AGENTS.md-compatible tool (Cursor, Windsurf, Copilot, Gemini CLI, Aider, etc.): nothing to install — the root `AGENTS.md` already routes them to the right `skills/<chain>-defi-architect/SKILL.md` the moment this repo is in your project.
 
 Each skill installs and works independently — you don't need all three.
+
+#### Getting updates automatically
+
+- **Claude Code plugin installs:** Claude Code turns auto-update off by default for marketplaces from outside Anthropic. Turn it on once with `/plugin` → Marketplaces → `defi-audit-suite` → **Enable auto-update**. Claude Code then updates the marketplace and your installed skills every time it starts. To update by hand instead: `claude plugin marketplace update defi-audit-suite`, then `claude plugin update evm-defi-architect@defi-audit-suite` (same for the other two), then restart.
+- **Teams:** commit this to your project's `.claude/settings.json` so everyone who opens and trusts the project gets the suite with auto-update on:
+  ```json
+  {
+    "extraKnownMarketplaces": {
+      "defi-audit-suite": {
+        "source": { "source": "github", "repo": "Shahnilsharma/smart-contracts-auditor-skill" },
+        "autoUpdate": true
+      }
+    }
+  }
+  ```
+- **`install.sh` copies, `dist/*.skill` uploads (claude.ai), Codex copies:** these never update by themselves — re-run `install.sh`, or upload the new `.skill` file again.
+- **Maintainers:** Claude Code detects updates by version number. Bump `version` in `.claude-plugin/marketplace.json` and in every `skills/<name>/.claude-plugin/plugin.json` and `plugins/<name>/.claude-plugin/plugin.json` on each release, then rebuild `dist/` and run `./check_dist_matches_source.sh`. Push changes without a version bump and nobody receives them, auto-update or not.
 
 ### 2. Use it — solo mode (default)
 Just ask normally: *"audit this Solidity contract," "build a lending protocol on ZigChain," "deploy this Anchor program to devnet."* Each skill's own `SKILL.md` frontmatter description is what triggers it.
