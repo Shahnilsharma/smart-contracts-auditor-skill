@@ -64,6 +64,35 @@ Solana's account model makes its vulnerability classes different from EVM's — 
 - `transfer_checked` used (validates mint + decimals) rather than plain `transfer` wherever mixing multiple mints or using Token-2022 with extensions.
 - Token-2022 extensions in use (transfer fees, transfer hooks, confidential transfers) explicitly accounted for in the money-flow logic — they change effective transferred amounts and can add hook-triggered external calls.
 
+## Token-2022 mint risk (extends Token program correctness above)
+- Mints accepted as collateral/deposits are checked for dangerous extensions and authorities: `PermanentDelegate` (the issuer can transfer or burn any holder's tokens, including the vault's), a freeze authority (the vault's token account can be frozen, blocking withdrawals), `MintCloseAuthority`, transfer hooks (an arbitrary program runs on every transfer), `DefaultAccountState::Frozen`. Allowlist mints, or reject these unless the threat model explicitly accepts them.
+- A non-null mint authority on an asset the protocol treats as fixed-supply flagged — supply can be inflated at will.
+
+## Oracle / price manipulation
+- Pyth: price read with a maximum age (`get_price_no_older_than` in `pyth-solana-receiver-sdk`), feed ID checked against the expected feed (not just "any Pyth-owned account"), and the confidence interval checked — reject the price if `conf / price` exceeds a threshold, and value collateral at `price - conf`, debt at `price + conf`.
+- Switchboard: staleness and variance checks on the feed, and the feed account address pinned in config.
+- Every oracle account's owner program and address validated against stored config — a spoofed oracle account with attacker-written price data is a classic Solana exploit path.
+- No AMM spot price (pool reserves read in the same transaction) used for collateral or liquidation decisions — flash loans exist on Solana, so single-transaction manipulation is possible (Mango Markets, 2022: collateral priced off a thinly-traded market's manipulated price).
+
+## Stale account data after CPI
+- After any CPI that can modify an account also loaded in this instruction (token transfer/mint/burn, a call into another program that writes a shared account), Anchor's deserialized `Account<'info, T>` still holds the pre-CPI data — `account.reload()?` is called before reading the updated fields (e.g. a token balance checked after a transfer).
+
+## `remaining_accounts`
+- Every account taken from `ctx.remaining_accounts` gets manual validation of owner, discriminator/type, signer/writable flags and expected address or PDA derivation — Anchor applies none of its constraints to these.
+- Length and ordering of `remaining_accounts` checked before indexing, not assumed.
+
+## `init_if_needed` reinitialization
+- Every `init_if_needed` account's handler guards against reinitialization (checks stored state is unset, or matches the expected owner/authority, before writing) — otherwise a second call overwrites existing state. Anchor puts this behind the opt-in `init-if-needed` feature for exactly this reason.
+- Associated token accounts created with `init_if_needed` carry `associated_token::mint` and `associated_token::authority` constraints.
+
+## Instruction introspection (Instructions sysvar)
+- Flash-loan and "must be paired with instruction X" patterns use `load_instruction_at_checked` (which validates the Instructions sysvar address), handle absolute vs. relative instruction indices correctly, and check the paired instruction's `program_id`, discriminator and accounts — not just that some instruction exists at that index.
+- Ed25519/Secp256k1 signature verification through the native precompile checks that the precompile instruction's offset fields (`*_instruction_index`) point at the precompile instruction itself (`u16::MAX`), so the signature, pubkey and message can't be sourced from a different instruction, and that the pubkey and message are the expected ones. Wormhole (2022) lost ~120k ETH because this verification path accepted a spoofed Instructions sysvar.
+
+## Slippage / MEV
+- Every swap/deposit/withdraw that converts at a market-dependent rate takes a caller-supplied minimum-out (or maximum-in) and enforces it on-chain — sandwiching via Jito bundles and leader-side ordering is routine on Solana.
+- Multi-transaction flows (create then fund, init then deposit) stay safe if an attacker's transaction lands in between.
+
 ## Compute budget / DoS
 - No unbounded loop over a user-growable account list within a single instruction (compute-unit ceiling makes this fail loudly, but design around it rather than hitting it in production).
 - CU cost profiled (via Mollusk) for any instruction doing significant looping/math/CPI fan-out.
@@ -98,4 +127,4 @@ State explicit coverage against this list in the audit report's methodology sect
 | 9 | Closing accounts | Reinitialization / account lifecycle (above) |
 | 10 | Sysvar address checking | Sysvar spoofing (above) |
 
-All 11 canonical categories mapped. Items beyond this list (CPI depth, clock/timestamp manipulation, governance bypass, rent exemption, Token-2022 correctness, compute budget/DoS, upgrade-authority centralization) are additions from this suite's own research, not part of the canonical list — call these out separately in a report so a reader can distinguish "covers the known baseline" from "goes beyond it."
+All 11 canonical categories mapped. Items beyond this list (CPI depth, clock/timestamp manipulation, governance bypass, rent exemption, Token-2022 correctness and mint risk, oracle/price manipulation, stale data after CPI, `remaining_accounts`, `init_if_needed`, instruction introspection, slippage/MEV, compute budget/DoS, upgrade-authority centralization) are additions from this suite's own research, not part of the canonical list — call these out separately in a report so a reader can distinguish "covers the known baseline" from "goes beyond it."

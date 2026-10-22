@@ -75,6 +75,47 @@ OWASP Smart Contract Top 10 (2026, current — the 2026 list restructured from 2
 - Storage layout compatibility checked between implementation versions (no reordered/removed state variables).
 - Storage gaps present in upgradeable base contracts.
 - Upgrade authority is timelocked/multisig, not a single EOA, for anything holding significant value.
+- Implementation contracts call `_disableInitializers()` in their constructor — an uninitialized implementation can be initialized by anyone, and for UUPS that means the attacker becomes the implementation's upgrade authority.
+- UUPS `_authorizeUpgrade` override carries an access-control check — an empty override lets anyone upgrade every proxy.
+- Custom (non-OZ) proxies checked for function-selector clashes between proxy admin functions and implementation functions — the transparent-proxy pattern exists to prevent exactly this.
+- No per-proxy configuration set via `constructor` or `immutable` in an upgradeable implementation (it lives in the implementation's bytecode, not proxy storage).
+
+## Vault share inflation (ERC-4626 first-depositor / donation attack)
+- Empty or near-empty vault: an attacker mints 1 wei of shares, donates assets directly to the vault to inflate the share price, and the next depositor's mint rounds down to 0 (or close to it), so the attacker redeems the victim's deposit. Check for a mitigation: virtual shares/assets offset (OZ ERC4626 `_decimalsOffset()`), dead shares burned on first deposit, or internal accounting that ignores direct transfers.
+- Any share price, collateral value or reward-per-token derived from `balanceOf(address(this))` flagged as donation-sensitive — not just ERC-4626 vaults.
+- Deposit/mint reverts when it would mint 0 shares, and user-facing deposit paths accept a minimum-shares-out parameter.
+
+## Signature verification & replay
+- Signed messages use EIP-712 with a domain separator that includes `chainId` and `verifyingContract`; a domain separator cached at deploy is recomputed if `block.chainid` changes (chain fork) — OZ `EIP712` does this.
+- Nonce or used-digest mapping prevents replaying the same signature; deadline/expiry enforced.
+- Raw `ecrecover` result checked `!= address(0)` — an invalid signature returns zero, which matches any unset signer variable. Prefer OZ `ECDSA.recover`, which reverts on invalid signatures and rejects malleable high-`s` values.
+- The signature bytes are never used as a uniqueness/replay key (malleable) — key on the nonce or the message digest.
+- Where contract wallets must be able to sign, ERC-1271 is supported (OZ `SignatureChecker`).
+
+## EOA assumptions after EIP-7702 (Pectra, May 2025)
+- No security check treats `tx.origin == msg.sender`, `msg.sender.code.length == 0` or `extcodesize == 0` as proof that the caller can't run code — under EIP-7702 an EOA can delegate to contract code, execute arbitrary logic and reenter while still being `tx.origin`. Flag reentrancy guards, flash-loan guards and anti-bot checks built on these.
+- Any ETH or token sent to an EOA can trigger code (a delegated EOA runs its delegate code on calls), so "EOA recipient = no callback" is no longer a safe assumption in CEI reasoning.
+
+## Arbitrary external calls & approval abuse
+- No function executes `target.call(data)` where both `target` and `data` come from the caller without an allowlist — a router/multicall/zap that holds standing user approvals can be made to call `token.transferFrom(victim, attacker, amount)` for every user who approved it.
+- Contracts that hold user approvals never expose arbitrary-call paths; if external calls must be generic, they run from a separate executor contract that holds no approvals and no funds between transactions.
+- `delegatecall` only to immutable/trusted targets — never to a caller-supplied address.
+
+## Read-only reentrancy
+- View functions other protocols consume as prices (share price, LP price, `totalAssets`-style getters) can't return inconsistent values mid-execution — e.g. while ETH is sent out during a withdrawal, before balances/supply update. Either update all state before the external call, or make the view revert while the reentrancy lock is held (OZ `_reentrancyGuardEntered()`).
+- When *consuming* another protocol's view (Curve/Balancer pool prices, LP-token pricing), check whether that protocol exposes a reentrancy-lock check and call it before trusting the value.
+
+## Chainlink feed edge cases (extends Oracle manipulation above)
+- `latestRoundData()` answer checked `> 0`, and `updatedAt` checked against that specific feed's documented heartbeat — not one global constant for all feeds.
+- On L2s (Arbitrum, Optimism, Base, etc.), the Chainlink L2 Sequencer Uptime Feed is checked, plus a grace period after the sequencer comes back, before trusting any price — otherwise stale prices during downtime enable unfair liquidations.
+- Feeds whose aggregator still enforces `minAnswer`/`maxAnswer`: if the real price crashes below `minAnswer` the feed keeps reporting `minAnswer`. The contract applies its own sanity bounds and fails closed instead of pricing a collapsed asset at the floor. Check the specific feed — most current feeds have these bounds effectively disabled.
+- Feed decimals read from `decimals()`, not assumed to be 8.
+
+## Solidity footguns
+- `msg.value` never read inside a loop or in a function reachable through a `delegatecall`-based `multicall` — every iteration/sub-call sees the same `msg.value`, so a user pays once and is credited many times.
+- `abi.encodePacked` never used with two or more dynamic-type arguments for a hash used as a key, signature payload or commitment (`("a","bc")` and `("ab","c")` collide) — use `abi.encode`.
+- Payout and liquidation paths account for tokens with blocklists (USDC, USDT): one blocklisted recipient makes a push-transfer revert, which can DoS a batch payout or block a liquidation — prefer pull-based withdrawals.
+- `approve` calls work with USDT-style tokens that require resetting allowance to 0 first and return no bool — use `SafeERC20.forceApprove`.
 
 ## Testing coverage sign-off
 - Every external/public function has a Foundry unit test (happy + revert) and, for numeric/address inputs, a fuzz test.
@@ -101,4 +142,4 @@ State explicit coverage against this list in the audit report's methodology sect
 | SC09 | Integer Overflow and Underflow | Integer overflow / underflow (above) |
 | SC10 | Proxy & Upgradeability Vulnerabilities | Upgrade / proxy safety (above) |
 
-All 10 current-year categories mapped. Items beyond this list (timestamp manipulation, governance bypass, permit front-running/nonce DoS, front-running/MEV generally, DoS) are additions from prior-year OWASP lists, the (deprecated but still tool-relevant) SWC Registry, and this suite's own research — call these out separately in a report so a reader can distinguish "covers the current official baseline" from "goes beyond it."
+All 10 current-year categories mapped. Items beyond this list (timestamp manipulation, governance bypass, permit front-running/nonce DoS, front-running/MEV generally, DoS, vault share inflation, signature replay, EIP-7702 EOA assumptions, arbitrary-call approval abuse, read-only reentrancy, Chainlink feed edge cases, Solidity footguns) are additions from prior-year OWASP lists, the (deprecated but still tool-relevant) SWC Registry, and this suite's own research — call these out separately in a report so a reader can distinguish "covers the current official baseline" from "goes beyond it."

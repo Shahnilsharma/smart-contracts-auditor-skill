@@ -25,6 +25,16 @@ Go through every item against actual code lines — cite the branch checked, not
 - `reply` handlers validate `msg.result` and don't trust unchecked external contract state.
 - No pattern where a submessage callback can re-enter and double-spend before the first call's state write lands.
 
+## Submessage / reply semantics
+- `ReplyOn` mode chosen deliberately: with `ReplyOn::Error` or `ReplyOn::Always`, a failed submessage's error is caught and the parent execution *continues* — the submessage's own state changes are reverted, but the parent's earlier writes persist. The reply handler either returns an error or correctly unwinds the parent's accounting (e.g. a deposit recorded before a transfer that then failed).
+- `reply` dispatches on `msg.id` and returns an error for unknown ids, not a silent `Ok`.
+- Data extracted in `reply` (e.g. a newly instantiated contract's address) comes from the response data (`msg_responses` in cosmwasm-std 2.x, or `cw_utils::parse_instantiate_response_data`) or from module-emitted events (e.g. `instantiate`) — never from attributes in `wasm` events, which the called (possibly untrusted) contract writes itself.
+
+## CW20 `Receive` hook
+- The `ExecuteMsg::Receive(Cw20ReceiveMsg)` handler checks `info.sender` against the expected/whitelisted CW20 token contract — inside `Receive`, `info.sender` is the token contract and `cw20_msg.sender` is the original user. Without this check anyone can call `Receive` directly with a made-up `amount` and be credited for tokens they never sent.
+- When several CW20s are accepted, the token is identified by `info.sender`, never by a field in the inner message.
+- Native denoms, CW20 contract addresses and token-factory denoms can't be confused in internal accounting (an `AssetInfo`-style enum, not a bare string that could be either).
+
 ## Funds handling
 - `info.funds` validated against expected denom + amount on every payable entry point.
 - No entry point that silently accepts and strands unexpected denoms.
@@ -44,6 +54,25 @@ Go through every item against actual code lines — cite the branch checked, not
 - If the contract is gated by a DAO/governance module (cw3 multisig, cw4 group, chain-level x/gov, or a custom voting contract), every governance-gated `ExecuteMsg` branch re-checks the *current* on-chain proposal/vote state at execution time, not a caller-supplied claim that a vote passed.
 - Voting power is snapshotted at proposal creation (not read live at execution) wherever token-weighted voting is used, to prevent same-block/same-tx balance manipulation from manufacturing voting power.
 - `MigrateMsg` and any "emergency"/bypass code path are checked against the same authority requirements as the normal governance path, or the bypass is explicitly documented as part of the key-compromise ladder in the threat model rather than a silent shortcut.
+
+## IBC packet lifecycle
+- `ibc_packet_ack` handles error acknowledgements and `ibc_packet_timeout` handles timeouts by refunding/unlocking whatever the send path escrowed — a missing refund path permanently strands funds on every failed or timed-out packet.
+- Check how the target chain's wasmd version treats an `Err` from `ibc_packet_receive` (aborted transaction vs. converted to an error acknowledgement), and confirm both outcomes leave the sending side able to refund.
+- `ibc_channel_open`/`ibc_channel_connect` validate the channel version string, ordering and counterparty port — accepting any channel lets anyone connect a malicious counterparty.
+- With IBC hooks (`ibc-hooks` middleware), the `info.sender` of a hook-triggered execute is an address derived from the channel and the remote sender, not the user's own address on this chain — never grant it that user's privileges or balances.
+
+## Storage key collisions
+- Every `Item`/`Map`/`IndexedMap` uses a unique namespace string — two storage items declared with the same key (the same `Map::new("balances")` in two modules, or an `Item` key equal to a `Map` prefix) silently read and write the same bytes.
+- Namespace strings stay unchanged across migrations unless the `migrate` handler explicitly moves the data.
+- Composite keys use `cw-storage-plus` tuple/`PrimaryKey` types, not ad-hoc string concatenation (`format!("{}{}", a, b)` collides the same way `abi.encodePacked` does).
+
+## Other entry points
+- `sudo` (callable only by chain modules — gov, scheduler modules, chain-specific callbacks) handles every `SudoMsg` variant defensively; confirm which modules on the target chain can actually invoke it.
+- `instantiate2` (predictable addresses): if a factory lets callers choose the salt, a front-runner can claim the salt/address another user expected — derive the salt from the caller's address. Funds sent to a predicted address before instantiation are only safe because the code checksum is part of the address; confirm the expected checksum is the one used.
+
+## Slippage / front-running
+- Swap, liquidity and liquidation entry points take a caller-supplied minimum-out or max-spread (Astroport-style `max_spread`/`belief_price`) and enforce it.
+- Anything where seeing a pending transaction gives an edge uses commit-reveal or batching — Cosmos mempools are public and block proposers choose transaction order.
 
 ## DoS / gas
 - No unbounded iteration over user-growable storage in a single tx (pagination or bounded maps used).
@@ -88,4 +117,4 @@ No formal numbered vulnerability registry exists specifically for CosmWasm as of
 | Migration bypassing instantiate-permission restrictions | Migration / restricted code-ID bypass (above) |
 | Decimal-mismatched fee math truncating to zero | Arithmetic (above) |
 
-Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup) are additions from this suite's own research — call these out separately in a report.
+Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup, submessage/reply semantics, CW20 `Receive` hook spoofing, IBC packet lifecycle and IBC hooks, storage key collisions, `sudo`/`instantiate2` entry points, slippage/front-running) are additions from this suite's own research — call these out separately in a report.
