@@ -93,7 +93,7 @@ Every finding a skill produces is rated by **impact × likelihood**, not impact 
 /plugin marketplace add <your-username>/<this-repo-name>
 /plugin install evm-defi-architect@defi-audit-suite
 ```
-(swap `evm-defi-architect` for `cosmwasm-defi-architect` or `solana-defi-architect`, or run all three). This works once you've pushed the repo to GitHub — see "Publishing this repo" below for the one placeholder you need to fill in first (`.claude-plugin/marketplace.json`'s `owner.name`, and every `plugin.json`'s `author.name`, currently say `REPLACE-WITH-YOUR-NAME-OR-ORG`).
+(swap `evm-defi-architect` for `cosmwasm-defi-architect` or `solana-defi-architect`, or run all three). If you're publishing your own fork, see "Publishing this repo" below — set `.claude-plugin/marketplace.json`'s `owner.name` and every `plugin.json`'s `author.name` to your own name first.
 
 **Any other terminal-based tool** (Codex CLI, or Claude Code if you'd rather not use the plugin mechanism): run the installer — it copies files to the right place and verifies the copy.
 ```bash
@@ -127,7 +127,7 @@ Don't assume — check. `INTEGRATION-CHECK.md` gives a mechanical check per tool
 ## Publishing this repo — GitHub, and "should I submit it to a store"
 
 **GitHub, step by step:**
-1. Before pushing: replace the placeholder in `.claude-plugin/marketplace.json` (`owner.name`) and in each `skills/<name>/.claude-plugin/plugin.json` (`author.name`) — currently `REPLACE-WITH-YOUR-NAME-OR-ORG`. Then copy each edited `plugin.json` into its `plugins/<name>/.claude-plugin/plugin.json` counterpart too (that's what the marketplace actually installs from — see the `plugins/` note above). Run `./check_dist_matches_source.sh` afterward — it validates all of this (including `plugins/` drift) automatically.
+1. Before pushing a fork: set your own name in `.claude-plugin/marketplace.json` (`owner.name`) and in each `skills/<name>/.claude-plugin/plugin.json` (`author.name`) — currently `Shahnil Sharma`. Then copy each edited `plugin.json` into its `plugins/<name>/.claude-plugin/plugin.json` counterpart too (that's what the marketplace actually installs from — see the `plugins/` note above). Run `./check_dist_matches_source.sh` afterward — it validates all of this (including `plugins/` drift) automatically.
 2. `git init && git add -A && git commit -m "initial" && git push` to a new GitHub repo (public, if you want others to install it).
 3. That's it for the Claude Code plugin-marketplace path above — `/plugin marketplace add <you>/<repo>` works the moment the repo is public on GitHub, no release/tag needed.
 4. **Optional, for the fastest possible download of just one skill without cloning**: create a GitHub Release and attach the 3 files from `dist/*.skill` as release assets. Anyone can then download a single `.skill` file directly from the Releases page and upload it via their Claude surface's UI — no `git clone`, no terminal at all.
