@@ -24,7 +24,7 @@ Centered, generous whitespace, in this order:
 - Report title: `"<Project Name>" Smart Contract Security Assessment` (or "Audit Report" — firms use both; either is fine)
 - Cluster (e.g. "Anchor — Solana devnet", or the resolved cluster if a custom one was used)
 - Prepared for: `<client/project name>`
-- Prepared by: name whoever is running this (a person, a team name, or "Claude via the solana-defi-architect skill" if no other identity was given — don't fabricate a firm name)
+- Prepared by: the user's own name, team or company, asked for at scope time (Phase 0). Never default it to the AI model or tool running the audit, and don't invent a firm name
 - Date, and a version/revision number if this is a re-issue after fix-review
 - If team mode was used: list the roles that contributed (architect / contract-engineer / qa-fuzzer / static-analyst / auditor), not fabricated individual human names
 

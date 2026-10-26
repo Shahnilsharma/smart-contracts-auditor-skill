@@ -28,6 +28,22 @@ Define properties as public functions returning `bool` (Echidna's own convention
 ## Aderyn (Rust-based static scanner, Cyfrin)
 Fast complementary scanner, VS Code extension available; treat as a second opinion alongside Slither rather than a replacement.
 
+## Halmos (symbolic testing of `check_*` functions)
+Run each `check_` function on its own, under the memory cap and ledger from `agency-audit-methodology.md` Phase 0.5. A timeout or an out-of-memory kill is `INCONCLUSIVE`, not a pass.
+
+## Certora
+Needs a Certora API key (paid). Without one, record it as `NOT EXECUTED` with the reason; don't substitute another tool and call it Certora.
+
+## Install and run notes (from real engagements)
+- **Python tools on PEP 668 systems** (`pip install` refused): run them through `uvx` without touching system Python — `uvx --from slither-analyzer slither .`, `uvx halmos`.
+- **Mythril:** `uvx --from mythril --with "setuptools<81" myth analyze ...` (newer setuptools breaks its `pkg_resources` import). Pass remappings with `--solc-json`, and point it at the project's exact solc version. Mythril analyzes the contract as deployed by its constructor, so code that only becomes reachable after initialization — EIP-1167 clones, initializer-gated templates — is mostly out of its reach; say so in the report and cover those paths with invariant tests instead.
+- **Echidna:** use the release binary; it needs `crytic-compile` on `PATH` (`uvx --from crytic-compile crytic-compile` behind a small wrapper script works).
+- **Halmos:**
+  - Run `forge clean` before Halmos if you built manually; it needs the AST output from its own build.
+  - Anchor test selection with `^` (`--match-test '^check_mulDiv$'`), otherwise nothing may match.
+  - Set `PYTHONUNBUFFERED=1` when redirecting to a log, or the log stays empty until the end.
+  - Full 256-bit multiplication and 512-bit intermediate math often exhaust the solver. Split the property into smaller lemmas (e.g. one per concrete shift amount) instead of raising memory or timeouts.
+
 ## Triage discipline
 - Never paste raw tool output as the audit report — every finding gets classified and, if true positive, mapped to a checklist item in `audit-checklist.md` with a concrete fix.
 - Track false-positive suppressions explicitly (e.g. `slither.config.json` filters) so the reasoning is visible to future reviewers, not silently hidden.

@@ -10,7 +10,18 @@ Before any code review:
 - **Define scope explicitly**: which files/contracts/programs are in scope, which commit hash, which are out of scope (e.g. third-party libraries, non-standard/weird tokens unless the protocol explicitly declares support for them — Code4rena's convention: exclude weird-ERC20 findings unless the token is named in scope, except USDT which is always treated as in-scope due to its ubiquity and known non-standard behavior).
 - **Define assets at risk**: funds, governance power, protocol-owned data, user data/privacy, availability.
 - **Define trust assumptions**: which roles are trusted by design (e.g. "the admin multisig is assumed honest, findings about a malicious admin are informational/centralization-risk, not a vulnerability, unless the architecture claims trustlessness").
+- **Ask who the report is from and for, and in what format** (Markdown, PDF, Word/Google Docs). "Prepared by" is the user's own name, team or company — never default it to the AI model or tool running the audit.
 - Write this down as a short scope document before touching code — ambiguity here is the single biggest cause of wasted audit time and disputed findings later.
+
+## Phase 0.5 — Run ledger and heavy tooling
+
+Real audits run tools for hours; sessions crash, run out of memory or get compacted mid-run. Without a written ledger the next session guesses what ran and misreports what didn't.
+- **Keep a run ledger** in the project workspace (e.g. `audit-out/STATUS.md`): one row per pipeline step and tool, with status (`RAN` / `INCONCLUSIVE` / `NOT EXECUTED` / `PENDING`), the exact command, the log path and a one-line result. Update it right after each step, not at the end. On resume, read the ledger first and continue from the first row that isn't `RAN`.
+- **Don't call the audit done while any row is `PENDING`.** Report every `INCONCLUSIVE` or `NOT EXECUTED` row with its reason and the exact command to run it later. A tool that ran out of memory or hit a timeout is `INCONCLUSIVE`, never a pass.
+- **Check resources before heavy jobs** (full builds of large test suites, symbolic/formal tools, coverage, long fuzz campaigns): `free -g`, `nproc`. When a full build is close to the memory limit, build and run only what the step needs.
+- **Run heavy jobs detached, with a log, a memory cap and a timeout, one at a time** — e.g. `setsid nohup timeout 4h <cmd> > audit-out/<step>.log 2>&1 &`, capped with `systemd-run --user --scope -p MemoryMax=12G <cmd>` or `ulimit -v`. Poll the log rather than holding the session open; a foreground job that gets the session killed takes its output with it.
+- **Stop processes by PID**, not `pkill -f <pattern>` — the pattern can match the agent's own shell command line and kill it.
+- On WSL, the VM's memory limit comes from `%UserProfile%\.wslconfig` (that exact filename — a `.wslconfig.txt` saved by Notepad is silently ignored) and only applies after `wsl --shutdown`.
 
 ## Phase 1 — Threat modeling (before line-by-line review, before bytecode)
 
@@ -23,6 +34,14 @@ Trail of Bits' stated principle: **audit the architecture before the bytecode**.
   2. Multisig controls critical functions.
   3. Multisig + timelock (delay gives users/monitors a chance to react/exit before a malicious or buggy change lands).
   4. Radical immutability / no privileged control path at all — highest resilience, but least operational flexibility.
+- **Test the incident response, not just the attack.** Rotating a compromised admin key or multisig must actually remove the old holder everywhere: every role it held, ownership of every contract (including child contracts created before *and after* the rotation), and any address cached in storage. Write the test as the attacker still holding the old key after rotation.
+- **Signing-path and operational compromise is the dominant 2025–2026 loss pattern**, ahead of code bugs, so rate the protocol's exposure to it even when the code is correct:
+  - Bybit (Feb 2025, ~$1.5B): multisig signers approved a malicious transaction shown to them through a compromised signing UI.
+  - Drift (Apr 2026, ~$285M, Solana): signers were tricked into pre-signing transactions held in durable-nonce accounts. With admin powers the attacker listed a worthless collateral token, inflated its oracle price, relaxed withdrawal limits and borrowed out real assets. No program bug was involved.
+  - Resolv (Mar 2026, ~$25M): one off-chain key approved mint amounts and the contract enforced no cap, so ~80M unbacked stablecoins were minted.
+  - KelpDAO (Apr 2026, ~$292M): a bridge configured with a single verifier accepted a forged cross-chain message.
+  
+  What to check: privileged actions that can move value (new collateral or market listings, oracle and risk-parameter changes, withdrawal-limit changes, upgrades) sit behind a timelock; anything an off-chain key authorizes is bounded by on-chain caps and rate limits; bridge/messaging verification needs more than one independent verifier; the signing process (hardware wallets, independently decoded calldata, no blind signing) is documented. File gaps as findings.
 - Output of this phase: a written threat model + risk matrix, reviewed with the team *before* deep code review starts, so review time is spent where the actual risk is.
 
 ## Phase 2 — Automated analysis (baseline, not the finish line)
@@ -41,6 +60,13 @@ Use the chain-specific `audit-checklist.md` in this skill. Every item needs a st
 
 Use this skill's testing reference for the chain-specific tools (Foundry fuzz+invariant / Hardhat scenarios for EVM; cw-multitest + Node QA runner for CosmWasm; LiteSVM/Mollusk/Surfpool + Trident/anchor-fuzz for Solana). Property/invariant tests should encode the same properties identified in Phase 1's risk matrix (solvency, no-value-creation, access-control invariants, single-method DoS, "user can't get more than entitled") — dynamic testing is most valuable when it's targeted at the specific risks already identified, not just generic fuzzing for its own sake.
 
+**A test that can't fail proves nothing.** For every security test, ask: would it still pass if the guard or fix were removed?
+- Negative tests (access control, input validation) assert the *specific* error — the exact custom error/selector, role-check message or revert reason — never "any revert". Otherwise a missing guard that reverts for an unrelated reason (wrong state, arithmetic, missing approval) still passes.
+- "Must not revert" properties are written so that a revert fails the check (e.g. `try`/`catch` with `assert(false)` in the catch arm). Symbolic tools in particular treat a reverting path as "no counterexample".
+- Fuzz properties with several branches measure how often each branch ran; a branch the fuzzer never hits is untested.
+- Invariant campaigns report per-handler call counts; a handler that never succeeds gets fixed before the invariant is cited as evidence.
+- Hand-rolled math (custom `mulDiv`, fixed-point, bit-shift overflow checks) is differentially fuzzed against a well-audited reference implementation across the full input range. This bug class caused Cetus (May 2025, a flawed overflow check, ~$223M) and Truebit (Jan 2026, an overflow that priced a mint at zero, ~$26M).
+
 ## Phase 5 — Formal verification (targeted, for high-value protocols/critical invariants)
 
 Not needed for every engagement, but standard practice at the top end (Certora, Halmos, KEVM, Solidity's built-in SMTChecker for a fast first pass) for a small number of properties that must be provably true — typically solvency/conservation invariants in lending, AMM, or vault-style protocols where a single broken invariant means fund loss at scale. Formal verification complements manual audit; it does not replace it — it proves the specified properties hold, it doesn't validate that the specification itself matches the intended economic design. Recommend this phase explicitly when: TVL/value-at-risk is large, the protocol has a small number of clearly-statable core invariants, and the team can afford the days-to-weeks setup cost. Certora Prover in particular supports EVM chains, Solana, Sui, and Stellar (Solidity/Vyper/Rust/Move/Soroban) as of its current published scope — check current support before assuming coverage for a given chain.
@@ -58,12 +84,24 @@ Distinct from code correctness: does the *incentive design* hold up under advers
 
 Well-corroborated finding across 2026 industry data: AI-only vulnerability scanning has a real false-positive/false-negative problem serious enough that the share of security teams relying solely on automated AI testing fell from 29% to 9% in one year, and 78% of organizations report that fully-automated AI scanning misses critical vulnerabilities outright. The state-of-the-art response, used by both academic frameworks (Veritas' Discover→Validate pipeline, MOSAIC-Bench's hand-verification oracle) and production tools (the POCO pattern: describe a vulnerability, generate an executable PoC, only report it if the PoC actually drains funds against a real deployment), is a hard validation gate between "found a candidate issue" and "reported as a confirmed finding."
 
-Apply this before writing any Critical or High severity finding into the report:
+Apply this before writing any Critical, High or Medium finding into the report:
 1. **Discover**: the manual-checklist/static-analysis/fuzzing passes (Phases 2-4) surface a candidate issue.
 2. **Validate**: before it goes in the report as Critical/High, write and run an actual test (Foundry `forge test`, `cw-multitest`, LiteSVM/Mollusk, whichever the chain skill uses) that demonstrates the exploit against the real code — the test should fail/revert-unexpectedly on the vulnerable code and pass/behave-correctly once notionally fixed. If you can't get an executable test to actually demonstrate it, downgrade the finding to a lower severity with an explicit note ("could not construct an executable PoC — flagged as suspected rather than confirmed") rather than reporting it as Critical/High on reasoning alone.
-3. Medium/Low/Informational findings don't require this gate — the cost only makes sense where a false positive would waste significant remediation effort or a false negative would be catastrophic.
+3. Low/Informational findings: write a test where it's cheap; otherwise label the finding `reasoning-only` in the report so readers can tell it apart from confirmed ones. Building the full attack path is also how underrated findings get caught — a Low that turns out to drain a pool is a Medium or High.
 
 This directly targets a documented failure mode: LLM-generated "proof of concepts" that look plausible but reference non-existent functions, wrong parameters, or exploit paths that don't actually execute — publishing one of those as a Critical finding is worse than not finding it, since it burns remediation time on something that isn't real and can erode trust in the rest of the report.
+
+## Phase 6.6 — Self-review before calling the audit complete
+
+Do this unprompted, before the final report — don't wait for the client to ask "is everything really checked?":
+1. Every finding maps to an executed test or is explicitly labeled `reasoning-only`.
+2. Every security test passes the "would it fail without the guard?" check from Phase 4.
+3. Re-run the full test suite once, after the last test file was added, and quote that run's numbers.
+4. Recount every number in the report (findings per severity, test counts, coverage, tool result counts) from the run ledger and the files, not from memory of earlier runs.
+5. Confirm every cited `file:line` still points at the code described and every referenced path exists.
+6. Re-rate each finding's severity now that its PoC exists.
+
+Record what this pass found and fixed in a short appendix, so a reader can see it happened.
 
 ## Phase 7 — Report
 
@@ -75,7 +113,7 @@ Real audits are not one-shot. After the team patches findings: re-review every p
 
 ## Phase 9 — Deployment verification
 
-Before calling the engagement done: verify the actually-deployed bytecode/program binary matches the audited source exactly — commit hash, compiler/toolchain version, and constructor/init arguments all recorded and checked. "Post-audit drift" (deploying a different build than what was reviewed, even unintentionally via a different compiler flag or a last-minute patch) silently invalidates the audit and is a real, recurring failure mode firms now explicitly check for.
+Before calling the engagement done: verify the actually-deployed bytecode/program binary matches the audited source exactly — commit hash, compiler/toolchain version, and constructor/init arguments all recorded and checked. "Post-audit drift" (deploying a different build than what was reviewed, even unintentionally via a different compiler flag or a last-minute patch) silently invalidates the audit and is a real, recurring failure mode firms now explicitly check for. Also confirm every deployment of the code (each chain, each fork or older version still live) carries every fix — Allbridge Core (2026) lost ~$1.65M on Solana to a flaw it had fixed on other deployments back in 2023.
 
 ## Phase 10 — Post-deployment: monitoring & incident response
 

@@ -47,6 +47,12 @@ contract VaultInvariantTest is Test {
 ## Symbolic testing (MVP feature — bounded proof, not a guarantee)
 `check*`/`prove*` functions run under `forge test --symbolic`. PASS means "no counterexample found within the modeled EVM surface and configured bounds" — known gaps include gas accounting, some Cancun+ opcodes, and unknown external code. Use for arithmetic-heavy pure logic where a bounded proof adds real value, not as a replacement for fuzz/invariant/manual review.
 
+## Large projects (`via_ir`, many test files)
+- A full `via_ir` build of a large test suite can take tens of minutes and several GB of memory. Build only what the step needs: `FOUNDRY_SPARSE_MODE=true forge test --match-path test/AuditPoC.t.sol` compiles just that file and its dependencies.
+- Run the full suite in groups (`--match-path 'test/<group>/*'`) when one full build won't fit in memory, then one complete run at the end for the numbers you report.
+- `forge coverage` with `via_ir` needs `--ir-minimum`. If some suites still hit "stack too deep", exclude them with `--no-match-path` and report the coverage as a lower bound over the suites that ran, naming the excluded ones.
+- Never use a bare `vm.expectRevert()` in an access-control or validation test — pass the exact selector or message (`vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, attacker, ROLE))`).
+
 ## Commands
 ```bash
 forge test -vvv                 # verbose trace on failure

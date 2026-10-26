@@ -7,6 +7,11 @@ Go through every item against actual code lines — cite the branch checked, not
 - Admin-only actions (pause, upgrade config, withdraw fees) can't be called by arbitrary sender.
 - `MigrateMsg` guarded — only current admin/gov can trigger migration, old state shape validated on migrate.
 - No unauthenticated funds-moving message.
+- Rotating the admin/owner (cw-ownable or custom) revokes the old one everywhere it's stored, including in child contracts the factory instantiated before and after the rotation, and the contract's wasmd admin (the address allowed to migrate) is rotated too. Test it as the old key after rotation.
+
+## Chain / VM version
+- The target chain runs a wasmvm with the 2025 VM fixes (CWA-2025-001 chain crash and CWA-2025-002 block slowdown, patched in 1.5.8, 2.0.6, 2.1.5 and 2.2.2) and CosmWasm ≥ 2.2.0 (CVE-2025-25500, contracts deployable without capability enforcement). These are chain-level issues, but a protocol launching on an unpatched chain inherits them — check and state the versions in the report.
+- `cosmwasm-std` itself is on a release patched for CWA-2024-002 (integer overflow in its math types; fixed in 2.0.2 for the 2.x line) — check the advisory for the patched release on the major version in use.
 
 ## Arithmetic
 - All token-amount math uses `Uint128`/`Decimal` **checked** ops (`checked_add/sub/mul/div`) — no raw operator on user-influenced values.
@@ -40,6 +45,8 @@ Go through every item against actual code lines — cite the branch checked, not
 - No entry point that silently accepts and strands unexpected denoms.
 - Contract balance invariant: sum of internal ledger == actual bank balance, tested explicitly.
 - Withdraw/claim paths can't be called twice for same accrued amount (idempotency / replay guard).
+- Mints, withdrawals or prices approved by an off-chain signer (a backend key, a bot, a relayer) are bounded on-chain: per-message and per-period caps, backing checks, and a signer that isn't a single key (Resolv, Mar 2026, EVM: one key could approve any mint amount; ~80M unbacked stablecoins minted).
+- Hand-rolled math (custom fixed-point, `Uint256`/`Uint512` mul-div helpers) is differentially fuzzed against `cosmwasm-std`'s own checked operations or another reference, and rounding is tested under repetition: many minimal-size operations in one transaction must not move a pool invariant or share price in the caller's favour (Balancer and Bunni, 2025, on EVM).
 
 ## Oracle / price
 - Price source has a staleness check (block height/time bound).
@@ -53,12 +60,15 @@ Go through every item against actual code lines — cite the branch checked, not
 ## Governance bypass
 - If the contract is gated by a DAO/governance module (cw3 multisig, cw4 group, chain-level x/gov, or a custom voting contract), every governance-gated `ExecuteMsg` branch re-checks the *current* on-chain proposal/vote state at execution time, not a caller-supplied claim that a vote passed.
 - Voting power is snapshotted at proposal creation (not read live at execution) wherever token-weighted voting is used, to prevent same-block/same-tx balance manipulation from manufacturing voting power.
+- Quorum and pass thresholds are sized against how much voting power can be bought on the open market. If buying enough votes costs less than what one proposal can move, add a veto/guardian path during the timelock and cap what a single proposal can transfer (BonkDAO on Solana, Jul 2026: ~$4M of tokens bought, ~$20M drained by a malicious proposal).
+- Adding a new collateral asset, market or oracle source is timelocked and new assets start with conservative caps (Drift on Solana, Apr 2026: a captured admin listed a worthless token, inflated its oracle price and borrowed real assets against it).
 - `MigrateMsg` and any "emergency"/bypass code path are checked against the same authority requirements as the normal governance path, or the bypass is explicitly documented as part of the key-compromise ladder in the threat model rather than a silent shortcut.
 
 ## IBC packet lifecycle
 - `ibc_packet_ack` handles error acknowledgements and `ibc_packet_timeout` handles timeouts by refunding/unlocking whatever the send path escrowed — a missing refund path permanently strands funds on every failed or timed-out packet.
 - Check how the target chain's wasmd version treats an `Err` from `ibc_packet_receive` (aborted transaction vs. converted to an error acknowledgement), and confirm both outcomes leave the sending side able to refund.
 - `ibc_channel_open`/`ibc_channel_connect` validate the channel version string, ordering and counterparty port — accepting any channel lets anyone connect a malicious counterparty.
+- Amounts minted or released per packet and per time window are rate-limited (an IBC rate-limit module or contract-level caps), so one forged or replayed message can't empty an escrow — the 2026 KelpDAO bridge loss (~$292M, EVM) came from one forged message.
 - With IBC hooks (`ibc-hooks` middleware), the `info.sender` of a hook-triggered execute is an address derived from the channel and the remote sender, not the user's own address on this chain — never grant it that user's privileges or balances.
 
 ## Storage key collisions
@@ -117,4 +127,4 @@ No formal numbered vulnerability registry exists specifically for CosmWasm as of
 | Migration bypassing instantiate-permission restrictions | Migration / restricted code-ID bypass (above) |
 | Decimal-mismatched fee math truncating to zero | Arithmetic (above) |
 
-Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup, submessage/reply semantics, CW20 `Receive` hook spoofing, IBC packet lifecycle and IBC hooks, storage key collisions, `sudo`/`instantiate2` entry points, slippage/front-running) are additions from this suite's own research — call these out separately in a report.
+Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup, submessage/reply semantics, CW20 `Receive` hook spoofing, IBC packet lifecycle and IBC hooks, storage key collisions, `sudo`/`instantiate2` entry points, slippage/front-running, admin rotation, chain/VM version advisories, off-chain-authorized actions, custom-math differential fuzzing and rounding under repetition, governance vote buying, collateral listing timelocks, IBC rate limits) are additions from this suite's own research — call these out separately in a report.

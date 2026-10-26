@@ -45,16 +45,20 @@ Solana's account model makes its vulnerability classes different from EVM's — 
 - Voting power/token balance used for a vote is snapshotted at proposal creation (or another fixed point), not read live at execution — otherwise a flash-loan-style same-transaction balance spike can manufacture voting power that was never actually held by a real long-term stakeholder.
 - Proposal execution instructions verify the specific proposal account's state (passed, not already executed, not expired/vetoed) rather than trusting a caller-supplied proposal ID/status without re-deriving it from on-chain data.
 - Timelock/delay between a passed vote and its execution exists and can't be skipped by an alternate code path (e.g. an "emergency" instruction that bypasses the same checks the normal path enforces) unless that bypass is itself explicitly gated and documented as part of the key-compromise ladder in the threat model.
+- Quorum and pass thresholds are sized against how much voting power can be bought on the open market. If buying enough votes costs less than what one proposal can move, add a veto/guardian path during the timelock and cap what a single proposal can transfer (BonkDAO, Jul 2026: ~$4M of tokens bought, ~$20M drained by a malicious proposal).
 
 ## Sysvar spoofing
 - Sysvars accessed via Anchor's typed `Sysvar<'info, T>` (validates the sysvar's well-known address) or, in native code, the account address explicitly checked against the expected sysvar pubkey — not trusted from an `AccountInfo` without validation.
 
 ## Reinitialization / account lifecycle
 - `init` (Anchor) used for account creation, not a manual "first-write" check that could be bypassed or raced.
+- The instruction that sets the protocol's admin or global config on first initialization can only be called by the program's upgrade authority or a hard-coded key. Otherwise whoever calls it first becomes admin — reported as the cause of a ~$1.1M loss on a Solana card-collateral program in 2026.
 - Account closing uses `close = destination` (zeroes data + drains lamports atomically) — no hand-rolled close that leaves the account revivable within the same transaction by re-crediting lamports before it's garbage-collected.
 
 ## Arithmetic
 - All value arithmetic (token amounts, lamports, share calculations) uses checked/saturating math — Rust release builds don't panic on overflow by default.
+- Hand-rolled math (custom `mul_div`, fixed-point, U256/U192 helpers, bit-shift overflow checks) is differentially fuzzed against a reference implementation across the full input range — Cetus (May 2025, ~$223M on Sui) was a flawed custom overflow check in a bit-shift helper; the same mistake is just as easy in Rust.
+- Rounding that loses a single unit per operation is tested under repetition: many minimal-size swaps/withdrawals in one transaction must not move the pool invariant or share price in the caller's favour (the 2025 Balancer and Bunni losses on EVM were this pattern; it is chain-independent).
 - Rounding direction in any share/exchange-rate calculation documented and favors the protocol, not the caller.
 
 ## Rent exemption
@@ -72,6 +76,7 @@ Solana's account model makes its vulnerability classes different from EVM's — 
 - Pyth: price read with a maximum age (`get_price_no_older_than` in `pyth-solana-receiver-sdk`), feed ID checked against the expected feed (not just "any Pyth-owned account"), and the confidence interval checked — reject the price if `conf / price` exceeds a threshold, and value collateral at `price - conf`, debt at `price + conf`.
 - Switchboard: staleness and variance checks on the feed, and the feed account address pinned in config.
 - Every oracle account's owner program and address validated against stored config — a spoofed oracle account with attacker-written price data is a classic Solana exploit path.
+- Listing a new collateral asset or market, or changing an oracle account or collateral weight, is timelocked, and new assets start with conservative caps — Drift (Apr 2026, ~$285M): with admin powers obtained through pre-signed transactions, the attacker listed a worthless token, inflated its oracle price and borrowed real assets against it.
 - No AMM spot price (pool reserves read in the same transaction) used for collateral or liquidation decisions — flash loans exist on Solana, so single-transaction manipulation is possible (Mango Markets, 2022: collateral priced off a thinly-traded market's manipulated price).
 
 ## Stale account data after CPI
@@ -100,6 +105,13 @@ Solana's account model makes its vulnerability classes different from EVM's — 
 ## Upgrade authority / admin
 - Upgrade authority holder documented (single key / multisig / immutable) and appropriate to the value at stake — single-key upgrade authority on a mainnet-beta program holding significant value is itself a finding.
 - Admin-only instructions gated the same way as any other privileged instruction (signer + expected-authority check).
+- Rotating an admin, multisig or authority revokes the old one everywhere it's stored (every config/PDA that records an authority), tested as the old key after rotation.
+- Admin multisigs (Squads or similar): a transaction signed against a durable nonce stays valid until that nonce is advanced, so a pre-signed admin transaction is a standing risk. Value-moving admin instructions sit behind a timelock, and signers check the decoded instructions — not just a description — before signing (Drift, Apr 2026).
+- Fund-moving programs have an emergency pause over deposits, borrows and withdrawals-to-third-parties that still lets users withdraw what they own.
+
+## Cross-chain messages
+- Programs receiving Wormhole/LayerZero/other bridged messages verify the emitter chain and emitter address, and that the message was verified by the expected core program — not just that some account deserializes as a message.
+- Amounts minted or released per message and per time window are rate-limited, so one forged message can't empty an escrow (KelpDAO, Apr 2026: a single-verifier bridge setup released ~$292M on one forged message).
 
 ## Testing coverage sign-off
 - Every instruction has a LiteSVM unit test (happy + revert).
@@ -127,4 +139,4 @@ State explicit coverage against this list in the audit report's methodology sect
 | 9 | Closing accounts | Reinitialization / account lifecycle (above) |
 | 10 | Sysvar address checking | Sysvar spoofing (above) |
 
-All 11 canonical categories mapped. Items beyond this list (CPI depth, clock/timestamp manipulation, governance bypass, rent exemption, Token-2022 correctness and mint risk, oracle/price manipulation, stale data after CPI, `remaining_accounts`, `init_if_needed`, instruction introspection, slippage/MEV, compute budget/DoS, upgrade-authority centralization) are additions from this suite's own research, not part of the canonical list — call these out separately in a report so a reader can distinguish "covers the known baseline" from "goes beyond it."
+All 11 canonical categories mapped. Items beyond this list (CPI depth, clock/timestamp manipulation, governance bypass, rent exemption, Token-2022 correctness and mint risk, oracle/price manipulation, stale data after CPI, `remaining_accounts`, `init_if_needed`, instruction introspection, slippage/MEV, compute budget/DoS, upgrade-authority centralization, admin initialization front-running, authority rotation, durable-nonce pre-signed admin transactions, emergency pause, cross-chain messages, governance vote buying, custom-math differential fuzzing, rounding under repetition) are additions from this suite's own research, not part of the canonical list — call these out separately in a report so a reader can distinguish "covers the known baseline" from "goes beyond it."
