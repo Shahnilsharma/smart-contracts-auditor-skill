@@ -4,6 +4,10 @@
 # to wire it into whichever orchestrator you're using (CrewAI, LangGraph, AutoGen/AG2,
 # OpenAI Agents SDK, Google ADK, or a custom harness).
 
+# This file describes the build layout. For auditing existing code, use the audit
+# layout in ../claude-code-agent-teams/team-lead-playbook.md: one lead plus 2-4
+# auditor agents, each owning a group of contracts.
+
 pipeline_name: defi-audit-pipeline
 chain_param: "{{chain}}"   # one of: cosmwasm, evm, solana — resolves which skill/references dir to read
 skill_path: "skills/{{chain}}-defi-architect/"

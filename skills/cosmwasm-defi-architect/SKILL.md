@@ -107,6 +107,8 @@ For anything holding meaningful value, offer: alert-threshold suggestions derive
 
 If the user asks for team/multiagent mode ("with a team", "multiagent", "agent team", "use N agents"), don't run steps 0-11 solo. Check whether `../../multi-agent/` exists relative to this file (true only inside the full suite repo, not for an installed standalone skill) — if it does, follow `../../multi-agent/README.md` and the playbook there. **If it doesn't exist** (the normal case for an installed skill), use `references/team-mode.md` instead — same roles/spawn-pattern/fallback, no dependency on files outside this skill's folder. Either way, say plainly which mode you're actually running.
 
+For an audit of code that already exists, use the **audit layout** in whichever of those files you follow: the lead scopes, maps and threat-models the whole system, then splits the contracts between 2–4 auditors sized from the contract count and free memory. The build layout is for new protocols. If a solo audit turns out to have 8 or more contracts in scope, offer the team audit layout once after scoping, with its token cost, and continue solo if the user declines.
+
 ## Output
 
 Every run produces: scope/threat-model doc (with risk matrix), architecture doc, contract source, Rust test suite, Node QA runner + results, audit report (with economic-review section and explicit scope/assumptions), deploy script/log + deployment-verification note. Save all to the project output directory (Claude: `/mnt/user-data/outputs/<project-name>/`, present with `present_files`; other agents: your equivalent workspace/output path — full detail in `../../PORTABILITY.md` at the suite root if present). Offer the fix-review and monitoring/IR follow-ups explicitly.

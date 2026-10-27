@@ -127,7 +127,7 @@ for name in cosmwasm-defi-architect evm-defi-architect solana-defi-architect; do
     continue
   fi
   missing=""
-  for section in "## Roles" "## Spawn pattern" "## Fallback" "## Other agent frameworks"; do
+  for section in "## Audit layout" "## Build layout" "## Spawn pattern" "## Fallback" "## Other agent frameworks"; do
     grep -q "^${section}" "$f" || missing="${missing} '${section}'"
   done
   if [ -n "$missing" ]; then

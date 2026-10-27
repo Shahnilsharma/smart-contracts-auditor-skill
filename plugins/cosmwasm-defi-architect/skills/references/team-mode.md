@@ -2,7 +2,40 @@
 
 This file exists because an installed skill (via `.skill` upload, `/mnt/skills/user/`, `.claude/skills/`, or `.agents/skills/`) only contains this skill's own folder — it does **not** include the suite repo's `multi-agent/` directory or `PORTABILITY.md`. If you're working inside the full suite repo (this file's parent directories include a sibling `multi-agent/` folder), use that instead — it has the complete playbook, all 6 subagent definitions, and the framework-agnostic role spec. This file is the compressed, standalone equivalent for when that isn't available.
 
-## Roles
+## Pick the layout first
+
+- **Audit layout** (below): the code already exists, in a repo or deployed, and the job is to audit it. This is the default whenever the request is to audit or review existing code. Work is split by contract, not by phase, and there is no contract-engineer.
+- **Build layout** (the roles further down): a new protocol is being designed and written.
+
+The user only has to say "audit this with a team". The lead works out the rest; never ask the user to design the team or write the spawn prompts.
+
+## Audit layout
+
+**Lead** (the session the user is talking to):
+1. Phase 0 scope as usual, including "Prepared by" and report format, plus chain, contract addresses and deployed commit if the code is live.
+2. List every in-scope contract and write `audit-out/contract-map.md`: who calls whom, who holds funds, the admin/owner/upgrade authority of each contract, shared state.
+3. Write one system-wide threat model (Phase 1) over that map.
+4. Build the whole workspace once with the release build. If it's deployed, compare each on-chain code hash with that build. A mismatch blocks that contract's audit until the deployed commit is found.
+5. Run the fast static tools once over the whole workspace, not once per teammate.
+6. Size the team, split the contracts (below), spawn the auditors, keep `audit-out/STATUS.md`.
+7. When every auditor has finished, do the cross-group pass (below). Then merge and dedupe: one root cause is one finding, even if two auditors hit it. Make severities consistent across groups, run Phases 6.5 and 6.6, and write the single report.
+
+**Team size:** auditors = min(ceil(contracts / 4), floor(available GB / 6), 4), and at least 2. Read "available" from `free -g`. For example, 13 contracts with 20 GB available gives 3 auditors. Under 5 contracts, a team costs more than it saves: say so and run solo unless the user insists.
+
+**Grouping:** put contracts that call each other or share funds or state with the same auditor, for example a vault, its strategy and its oracle adapter. Balance groups by lines of code, not by count. A contract on the edge between two groups goes into both briefs as "interface only" for the group that doesn't own it.
+
+**Each auditor's spawn prompt** gives the chain skill path, its group, and the paths to `contract-map.md` and the threat model. It tells the auditor to read `SKILL.md`, `references/audit-checklist.md` and `references/agency-audit-methodology.md` first, and to:
+- Run the full checklist on its group. List every check it performed, not only the hits.
+- Write a proof-of-concept test for every Medium-or-higher finding, following the Phase 4 rules (exact errors, a test that can fail).
+- Message the owning auditor when a finding crosses into another group's contract, and the lead when it contradicts the threat model.
+- Run one heavy command at a time (build, full test suite, fuzz campaign), under the Phase 0.5 memory cap.
+- Write findings to `audit-out/findings/<group>.md` in the report's finding format, and mark each tool it was asked to run as RAN, INCONCLUSIVE or NOT EXECUTED.
+
+**Cross-group pass:** each auditor saw only one side of every boundary. After the groups report, the lead walks only the edges of the contract map: every cross-contract call, reply or callback, and shared-state assumption.
+
+**Without Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` unset): the audit layout still works with plain subagents, one per group, run in parallel. They can't message each other, so the lead relays cross-group findings and does the cross-group pass itself. Say which of the two is running.
+
+## Build layout — roles
 
 | Role | Does | Depends on |
 |---|---|---|
