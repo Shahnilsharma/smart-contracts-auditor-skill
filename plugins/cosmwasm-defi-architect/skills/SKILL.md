@@ -22,10 +22,13 @@ If user gives `--chain-docs <url>` or `--chain-docs <file.md>`, or says "use cha
 
 Always confirm resolved: chain-id, RPC, denom, gas price, cw version, testnet-vs-mainnet before writing code.
 
+Then read the chain's real versions and permissions from a node, not from docs pages. Check them against the capability, advisory and per-chain rules in `references/tooling-and-versions.md` (sections 1–3 and 6), and record them in the report. For contracts that are already deployed, mainnet's versions are the ones that matter. Testnets often run a different version.
+
 ## 0.5 Environment check (do this before claiming any tool ran)
 
 Before writing code, and again before any QA/static-analysis/deploy step, check what's actually available in the current execution environment — don't assume `zigchaind`, `cargo`, or network access exist just because the skill tells you to use them:
-- `command -v zigchaind`, `command -v cargo`, `command -v cargo-clippy`, `command -v cargo-audit`.
+- `command -v zigchaind`, `command -v cargo`, `command -v cargo-clippy`, `command -v cargo-audit`, `command -v cosmwasm-check`, `command -v cargo-deny`, plus any testing tool you plan to use from `references/tooling-and-versions.md` section 5.
+- `rustc --version`: Rust 1.87+ builds fail to upload unless they go through the optimizer (section 4 of the same file).
 - A quick reachability check on the configured RPC endpoint before any live-network step (the Node QA runner against testnet, `scripts/deploy.sh`).
 
 If a required tool or network access is unavailable (common in a sandboxed chat context with no shell/network, or an agent without code execution): still write the code/tests/scripts — that's still valuable — but **do not claim they were run**. Label every test/scan result explicitly as one of: `RAN` (with the real output attached) or `NOT EXECUTED — <tool> unavailable in this environment; run locally with: <exact command>`. Mirror `scripts/deploy.sh`'s own honest SKIPPED pattern (the smoke-execute/query-verify steps already do this when their env vars aren't set) — the same discipline applies here. This directly matters for the Phase 6.5 validation gate in `references/agency-audit-methodology.md` — a finding claimed as validated by an executed PoC that was never actually run is exactly the "PoC pollution" failure mode that gate exists to prevent; if you can't execute it, downgrade the finding per that gate's own instructions rather than reporting it as confirmed.
@@ -65,13 +68,25 @@ Always generate **both**:
 
 Target the specific properties identified in step 2's risk matrix (solvency, no-value-creation, access-control invariants), not just generic happy-path testing.
 
+Pick further tools by testing type from `references/tooling-and-versions.md` section 5:
+- **Always:** property tests on the math, a stateful invariant campaign over cw-multi-test (CosmFuzz or proptest), coverage, and mutation testing on money paths.
+- **When the chain has one:** a test-tube environment.
+- **When IBC is in scope:** an IBC end-to-end test.
+
+cw-multi-test has no gas metering and no native modules. Anything that depends on gas, a token factory, a native DEX or Stargate/Any messages must also run on a local node or testnet.
+
 Before running the Node runner, **always ask the user** (don't assume): mnemonic-per-role (paste/env var) or binary/system keyring (`zigchaind keys` / OS keyring) — see step 8.
 
 QA runner must cover, sequentially, per role: happy path, permission-denied path, edge/boundary amounts, replay/idempotency, and a final invariant check (contract balance == sum of internal ledger).
 
 ## 6. Static analysis (Phase 2 — baseline, not the finish line)
 
-CosmWasm/Rust tooling is thinner than EVM's: run `cargo clippy --all-targets -- -D warnings` and `cargo audit` (dependency CVEs) as a baseline every time. Manually check for the patterns automated Rust tooling won't catch: unchecked arithmetic on `Uint128`/`Decimal`, missing sender checks, submessage `reply` trust issues — these carry into the manual checklist in step 7. Get automated tooling clean/triaged before spending manual-review time on things it would have caught.
+CosmWasm/Rust tooling is thinner than EVM's. Baseline every time:
+- `cargo clippy --all-targets -- -D warnings`, plus the extra lints listed in `references/tooling-and-versions.md` section 5.
+- `cargo audit` and `cargo deny check` for dependencies.
+- `cosmwasm-check` on the built artifacts, with the target chain's capabilities.
+
+Trail of Bits' `cosmos-vulnerability-scanner` skill is a useful second opinion if it's installed. Manually check for the patterns automated Rust tooling won't catch: unchecked arithmetic on `Uint128`/`Decimal`, missing sender checks, submessage `reply` trust issues — these carry into the manual checklist in step 7. Get automated tooling clean/triaged before spending manual-review time on things it would have caught.
 
 ## 7. Audit pass (Phases 3, 6, 7 of the methodology)
 
@@ -97,7 +112,7 @@ Never assume the wallet method. Ask:
 
 Default: **testnet**. Only deploy to mainnet if user explicitly says so (e.g. `--network mainnet` or "deploy to mainnet") — confirm once before broadcasting. Use `scripts/deploy.sh` (store -> instantiate -> execute smoke test -> query verify) with the resolved chain params from step 0. Whitelisting: ZIGChain restricts `store` to whitelisted addresses (`references/zigchain.md`) — check/remind user before store step.
 
-After deploying: confirm the stored code's checksum/code-id matches the audited build (same commit, same `cosmwasm/workspace-optimizer` version/settings) — deploying a different build than what was reviewed silently invalidates the audit.
+After deploying: confirm the stored code's checksum/code-id matches the audited build (same commit, same `cosmwasm/optimizer` image, version and CPU architecture, since x86_64 and arm64 builds give different checksums) — deploying a different build than what was reviewed silently invalidates the audit.
 
 ## 11. Post-deployment: monitoring & incident response (Phase 10)
 

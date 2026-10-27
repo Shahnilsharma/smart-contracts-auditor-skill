@@ -11,12 +11,27 @@ Go through every item against actual code lines — cite the branch checked, not
 
 ## Chain / VM version
 - The target chain runs a wasmvm with the 2025 VM fixes (CWA-2025-001 chain crash and CWA-2025-002 block slowdown, patched in 1.5.8, 2.0.6, 2.1.5 and 2.2.2) and CosmWasm ≥ 2.2.0 (CVE-2025-25500, contracts deployable without capability enforcement). These are chain-level issues, but a protocol launching on an unpatched chain inherits them — check and state the versions in the report.
-- `cosmwasm-std` itself is on a release patched for CWA-2024-002 (integer overflow in its math types; fixed in 2.0.2 for the 2.x line) — check the advisory for the patched release on the major version in use.
+- `cosmwasm-std` itself is on a release patched for CWA-2024-002 (wrapping `Uint256/512::pow` and `Int256/512::neg`; patched in 1.4.4, 1.5.4 and 2.0.2).
+- Read the chain's real wasmd/wasmvm/ibc-go versions from a node (`tooling-and-versions.md` section 1) and check them against the full advisory table there, through CWA-2026-006 (sandbox escape) and ASA-2024-007 (ibc-hooks reentrancy). Check mainnet and testnet separately.
+- The contract's `cosmwasm_*` capability features exist on the target chain, `cosmwasm-check` passes on the exact artifact being deployed, and the test suite uses the cw-multi-test major that matches `cosmwasm-std`.
+- On `cosmwasm-std` 3, `Coin::amount` is `Uint256`: every conversion to `Uint128` is a checked `try_into`, never a truncating cast, and contracts migrated from 2.x to 3 are re-reviewed for this.
 
 ## Arithmetic
 - All token-amount math uses `Uint128`/`Decimal` **checked** ops (`checked_add/sub/mul/div`) — no raw operator on user-influenced values.
 - Division/rounding direction always favors the protocol/pool, not the caller (documented explicitly).
 - No silent truncation that lets a user round a fee to zero via small amounts — if a fee calculation truncates to zero for a legitimate-sized input, charge a minimum of 1 unit rather than letting it pass free (a disclosed pattern from real CosmWasm audits: `Decimal`-based fee math can truncate to exactly zero even for non-trivial amounts when decimals differ across assets — always normalize decimal places across assets being compared/combined before the calculation, not after).
+
+## Storage writes
+- Every value loaded from storage, changed and meant to persist is saved back. A struct mutated in memory and never written back is a common real finding (Oak Security spotlight #1, "unsaved storage changes"). Trace every `load` to its `save` or `update`, especially across early returns.
+- `may_load` on missing data doesn't silently fall back to a default that resets a user's position or a global counter.
+
+## Lists of IDs and duplicates
+- Any message that takes a list (position IDs, order IDs, denoms, recipients, validator addresses) rejects duplicates or is idempotent per element. Mirror Protocol (Terra, 2021–22, about $90M) let one position ID be passed hundreds of times in a single unlock call.
+- Per-element limits apply to the total too: a cap checked per item but not per message can be bypassed by splitting.
+
+## Balance accounting
+- Accounting uses an internal ledger, not the contract's bank balance. Anyone can send funds directly to a contract: Mirror's attacker inflated a position's locked amount with a direct transfer. In vaults, a direct transfer is the first-depositor share-inflation attack.
+- Vault and LP share math has a minimum initial deposit, dead shares or a virtual offset, so the first depositor can't round later depositors down to zero shares.
 
 ## IBC / cross-module query DoS
 - Any query that enumerates a contract's IBC channels, connections, or other cross-module state (e.g. a `ListChannels`-style query) filters to the calling contract's own scope rather than returning global chain state — an unfiltered enumeration query becomes more expensive (and eventually fails/DoSes) as the chain accumulates more channels/connections over time, independent of anything the contract itself did wrong. This is a disclosed, real pattern from a published CosmWasm core audit (Oak Security, 2022) — the general lesson applies to any contract exposing a similarly unbounded cross-module enumeration.
@@ -52,6 +67,8 @@ Go through every item against actual code lines — cite the branch checked, not
 - Price source has a staleness check (block height/time bound).
 - No single-block/single-tx price used for large-value decisions without TWAP or bounds check.
 - Oracle failure mode (missing/zero price) fails closed, not open.
+- The staleness check uses the time the price was published, not when it was pushed to the contract. Trading pauses while prices are stale instead of filling at the last price. Levana (Osmosis, Dec 2023, about $1.1M) lost money when a congestion attack kept Pyth updates from landing and traders opened positions against stale prices. Check the confidence interval too (Pyth `conf`).
+- A native AMM pool's spot price (Osmosis, Astroport, the ZigChain DEX module) moves within one transaction and is never used as an oracle.
 
 ## Timestamp / block manipulation
 - No high-value decision depends solely on `env.block.time`/`env.block.height` in a way a validator/proposer could profitably nudge — flag single-block-time-gated auctions, vesting-cliff edges, or "did the window just close" checks as findings; prefer a grace-period buffer for anything security-critical.
@@ -69,6 +86,9 @@ Go through every item against actual code lines — cite the branch checked, not
 - Check how the target chain's wasmd version treats an `Err` from `ibc_packet_receive` (aborted transaction vs. converted to an error acknowledgement), and confirm both outcomes leave the sending side able to refund.
 - `ibc_channel_open`/`ibc_channel_connect` validate the channel version string, ordering and counterparty port — accepting any channel lets anyone connect a malicious counterparty.
 - Amounts minted or released per packet and per time window are rate-limited (an IBC rate-limit module or contract-level caps), so one forged or replayed message can't empty an escrow — the 2026 KelpDAO bridge loss (~$292M, EVM) came from one forged message.
+- Ack and timeout handling is idempotent and follows checks-effects-interactions: a second ack or timeout for the same packet can't refund twice. ASA-2024-007 (ibc-go, Apr 2024) let a contract re-run an ICS-20 timeout from inside an ibc-hooks callback, which could have drained escrow on chains with permissionless upload.
+- IBC callbacks (`ibc_source_callback`, `ibc_destination_callback`, CosmWasm 2.1+): anyone can trigger a destination callback by sending an ICS-20 transfer with a memo. Treat the sender, denom and amount as untrusted, and check the funds against the contract's real bank balance change. A source callback is trusted only for packets this contract sent.
+- IBC v2 entry points (`ibc2_packet_receive/ack/timeout/send`, CosmWasm 3.0): validate the source client and port. Check whether the chain is affected by CWA-2026-002 (wasmd 0.61.x with IBC v2).
 - With IBC hooks (`ibc-hooks` middleware), the `info.sender` of a hook-triggered execute is an address derived from the channel and the remote sender, not the user's own address on this chain — never grant it that user's privileges or balances.
 
 ## Storage key collisions
@@ -79,6 +99,20 @@ Go through every item against actual code lines — cite the branch checked, not
 ## Other entry points
 - `sudo` (callable only by chain modules — gov, scheduler modules, chain-specific callbacks) handles every `SudoMsg` variant defensively; confirm which modules on the target chain can actually invoke it.
 - `instantiate2` (predictable addresses): if a factory lets callers choose the salt, a front-runner can claim the salt/address another user expected — derive the salt from the caller's address. Funds sent to a predicted address before instantiation are only safe because the code checksum is part of the address; confirm the expected checksum is the one used.
+
+## Native module messages and queries
+- `CosmosMsg::Any` and `CosmosMsg::Stargate` messages are built by the contract from validated fields. A contract that forwards a user-supplied `type_url` and bytes executes arbitrary module messages with the contract's own authority (its funds, its token-factory admin rights, its authz grants).
+- Stargate and gRPC queries are on the chain's allowlist and are deterministic. A non-deterministic module query can halt the chain (CWA-2024-006).
+- Token-factory denoms accepted as collateral or pool assets: check who holds bank admin, the minting cap and whether it can change, and authz grants. A denom whose admin can mint without limit is worth only the admin's honesty. If the contract is itself a denom admin, the role-transfer and authz paths are access-controlled like any admin key.
+
+## Instances and code IDs
+- When upload or instantiate is permissionless (`instantiate_default_permission: Everybody`), anyone can create their own instance of the protocol's code with their own admin. Registries, factories, routers and front ends trust specific contract addresses, not "any contract with code ID N" or matching checksum, unless the code itself enforces all the config that matters.
+- `instantiate` can't be front-run to take ownership of a predicted address or to initialize a shared resource first.
+
+## Untrusted recipients and payouts
+- Payouts to user-supplied addresses use bank sends, not `WasmMsg::Execute` into the recipient. A recipient contract that always errors would otherwise revert liquidations, withdrawal queues or batch settlements for everyone.
+- Calls into untrusted contracts that must not block the protocol use `SubMsg` with a gas limit and `ReplyOn::Error`, with the reply handling the failure.
+- Batched payouts don't fail entirely because one recipient is a blocked module account or an invalid address. Skip and record the failure, or make each claim pull-based.
 
 ## Slippage / front-running
 - Swap, liquidity and liquidation entry points take a caller-supplied minimum-out or max-spread (Astroport-style `max_spread`/`belief_price`) and enforce it.
@@ -94,8 +128,56 @@ Go through every item against actual code lines — cite the branch checked, not
 
 ## Input validation
 - No `unwrap()`/`expect()`/`panic!` reachable from user input — all fallible ops return `ContractError`.
-- String/Addr inputs validated (`deps.api.addr_validate`) before storage or use as key.
+- String/Addr inputs validated (`deps.api.addr_validate`) before storage or use as key, and the returned `Addr` is what's stored and compared, never the raw string. The same address in different letter case or prefix must map to one key: Halborn's disclosure covering 20+ CosmWasm chains (fixed in the host's `addr_validate`) showed upper-case Bech32 strings bypassing blocklists, creating duplicate pools and permanently locking CW20s sent to them. Oak Security spotlight #3 covers the same class. Check the chain's host is patched, and don't assume lower case in contract code.
 - Boundary values tested: 0, 1, max `Uint128`, empty vecs/strings.
+
+## Protocol-type checks
+Run the block that matches the protocol, in addition to everything above.
+- **AMM / DEX (constant product, stableswap, concentrated liquidity):**
+  - Invariant holds after every swap, deposit and withdrawal, including fees and rounding.
+  - The first LP can't manipulate the initial price or share supply.
+  - Stableswap amplification changes are ramped, not instant.
+  - Concentrated-liquidity tick crossing and fee growth are tested at range edges.
+  - Every swap path takes a minimum output.
+- **Lending / CDP:**
+  - Collateral factors and liquidation thresholds per asset; the liquidation bonus can't exceed the collateral.
+  - Bad debt has a defined path (insurance fund, socialization) rather than silently breaking solvency.
+  - Interest accrues before every balance change.
+  - Borrow and supply caps on new or thin-liquidity assets.
+  - Liquidations still work when the oracle is stale or the user's position is dust.
+- **Vaults / yield:**
+  - Share inflation (see Balance accounting).
+  - Strategy and harvest calls are access-controlled.
+  - Reported vs. actual assets, after losses in an underlying protocol.
+  - The withdrawal queue can't be blocked by one user (see Untrusted recipients).
+- **Liquid staking** (contract stakes via `StakingMsg` / `DistributionMsg`):
+  - The exchange rate accounts for slashing, pending unbonding and the 21-day-style unbonding period.
+  - Redelegation limits are respected.
+  - Rewards are withdrawn before the delegation changes, and the withdraw address can't be changed by an unauthorized caller.
+  - The validator set update is access-controlled.
+  - Unbonding batches can't be claimed twice.
+- **Perps / derivatives:**
+  - Oracle freshness at execution (Levana).
+  - Funding and borrow fees accrue before position changes.
+  - Max leverage and open-interest caps.
+  - LP pool can't go insolvent from one market.
+  - Keeper and liquidation incentives cover gas under congestion.
+- **Launchpad / vesting / airdrop:**
+  - Merkle leaves include the claimer address, amount and stage, and claimed status is tracked per stage.
+  - Vesting schedules can't be changed retroactively by the admin without being stated as a trust assumption.
+  - Unclaimed funds have a defined end state.
+- **NFT (cw721) and marketplaces:**
+  - Approvals are cleared on transfer.
+  - Royalties are enforced the way the threat model assumes.
+  - Escrowed NFTs and bids can be withdrawn when listings are cancelled.
+  - Collection contracts are pinned by address.
+- **Bridges / IBC apps:** packet lifecycle, idempotent acks, rate limits and callbacks (see IBC sections), and a single forged message can't release more than the rate limit.
+- **DAO / governance:** see Governance bypass. Proposal execution runs arbitrary messages with the DAO's authority, so module and proposal-type allowlists matter.
+- **Interchain accounts / interchain queries (Neutron-style):**
+  - An ICA on an ordered channel closes on timeout, and the contract must handle the channel being gone.
+  - Transaction queries prove inclusion, not completeness: a relayer can skip transactions.
+  - Key-value query results carry the height they were proven at, and the contract rejects stale results.
+  - Relayer fees and query deposits can't be drained by a third party.
 
 ## Testing coverage sign-off
 - Every execute branch has a Rust `cw-multitest` case (happy + at least one adversarial).
@@ -127,4 +209,12 @@ No formal numbered vulnerability registry exists specifically for CosmWasm as of
 | Migration bypassing instantiate-permission restrictions | Migration / restricted code-ID bypass (above) |
 | Decimal-mismatched fee math truncating to zero | Arithmetic (above) |
 
-Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup, submessage/reply semantics, CW20 `Receive` hook spoofing, IBC packet lifecycle and IBC hooks, storage key collisions, `sudo`/`instantiate2` entry points, slippage/front-running, admin rotation, chain/VM version advisories, off-chain-authorized actions, custom-math differential fuzzing and rounding under repetition, governance vote buying, collateral listing timelocks, IBC rate limits) are additions from this suite's own research — call these out separately in a report.
+| Real Cosmos incident or disclosure | Covered by |
+|---|---|
+| Mirror Protocol duplicate position IDs (Terra, 2021–22, ~$90M) | Lists of IDs and duplicates; Balance accounting (above) |
+| Levana stale-oracle trading during congestion (Osmosis, Dec 2023, ~$1.1M) | Oracle / price (above) |
+| Halborn Bech32 address normalization (20+ chains) | Input validation (above) |
+| ASA-2024-007 ibc-hooks timeout reentrancy (Apr 2024) | IBC packet lifecycle (above) |
+| CWA-2024-006 non-deterministic module query | Native module messages and queries (above) |
+
+Items beyond both anchors (timestamp/block manipulation specific to `env.block.time`, WriteFlat-style gas blowup, submessage/reply semantics, CW20 `Receive` hook spoofing, IBC packet lifecycle and IBC hooks, storage key collisions, `sudo`/`instantiate2` entry points, slippage/front-running, admin rotation, chain/VM version advisories, off-chain-authorized actions, custom-math differential fuzzing and rounding under repetition, governance vote buying, collateral listing timelocks, IBC rate limits, unsaved storage changes, duplicate IDs in lists, internal-ledger accounting, IBC callbacks and IBC v2, `CosmosMsg::Any`/Stargate forwarding, token-factory denom trust, code-ID-based trust, untrusted payout recipients, `Coin::amount` as `Uint256`, protocol-type checks) are additions from this suite's own research — call these out separately in a report.
