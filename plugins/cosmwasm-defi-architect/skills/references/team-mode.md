@@ -33,7 +33,7 @@ The user only has to say "audit this with a team". The lead works out the rest; 
 
 **Cross-group pass:** each auditor saw only one side of every boundary. After the groups report, the lead walks only the edges of the contract map: every cross-contract call, reply or callback, and shared-state assumption.
 
-**Without Agent Teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` unset): the audit layout still works with plain subagents, one per group, run in parallel. They can't message each other, so the lead relays cross-group findings and does the cross-group pass itself. Say which of the two is running.
+**Use real Agent Teams by default.** Auditors messaging each other about cross-group findings is the point of this layout. Before spawning, check `echo $CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`. If it isn't `1`, stop and tell the user: add `"env": {"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"}` to `~/.claude/settings.json` and restart Claude Code, then ask for the team audit again. Fall back to plain subagents (one per group, the lead relaying cross-group findings and doing the cross-group pass itself) only if the user says to go ahead without teams, and say in the report which one ran.
 
 ## Build layout — roles
 
