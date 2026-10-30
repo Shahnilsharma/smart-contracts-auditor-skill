@@ -2,7 +2,7 @@
 name: architect
 description: Scopes the engagement and produces the threat model, risk matrix, and architecture doc for a smart contract/program before any code is written. Use PROACTIVELY at the start of any team-mode audit or build engagement — every other teammate depends on this output.
 tools: Read, Write, Grep, Glob, WebSearch, WebFetch
-model: inherit
+model: opus
 color: blue
 ---
 

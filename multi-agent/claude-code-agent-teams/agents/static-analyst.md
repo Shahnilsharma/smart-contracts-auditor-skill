@@ -2,7 +2,7 @@
 name: static-analyst
 description: Runs and triages automated static/dynamic analysis tooling once the contract-engineer's code exists. Runs in parallel with qa-fuzzer.
 tools: Read, Write, Bash, Grep, Glob
-model: inherit
+model: sonnet
 color: purple
 ---
 

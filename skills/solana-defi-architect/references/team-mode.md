@@ -22,6 +22,8 @@ The user only has to say "audit this with a team". The lead works out the rest; 
 
 **Team size:** auditors = min(ceil(contracts / 4), floor(available GB / 6), 4), and at least 2. Read "available" from `free -g`. For example, 13 contracts with 20 GB available gives 3 auditors. Under 5 contracts, a team costs more than it saves: say so and run solo unless the user insists.
 
+**Models:** name the model in every spawn prompt. A model named there overrides everything else; without one, every teammate silently runs on the lead's model. Auditors get `opus`, because finding bugs is the reasoning-heavy part of an audit. To save tokens, use fewer auditors rather than a smaller model. If the user names a model for the team or a role, use theirs. If `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` is set, Claude Code ignores models named in prompts, so note that. Record each teammate's model in `audit-out/STATUS.md` and in the report's methodology section.
+
 **Grouping:** put contracts that call each other or share funds or state with the same auditor, for example a vault, its strategy and its oracle adapter. Balance groups by lines of code, not by count. A contract on the edge between two groups goes into both briefs as "interface only" for the group that doesn't own it.
 
 **Each auditor's spawn prompt** gives the chain skill path, its group, and the paths to `contract-map.md` and the threat model. It tells the auditor to read `SKILL.md`, `references/audit-checklist.md` and `references/agency-audit-methodology.md` first, and to:
@@ -45,6 +47,8 @@ The user only has to say "audit this with a team". The lead works out the rest; 
 | static-analyst | Manual pattern scan (`references/audit-checklist.md`) + `cargo audit` | contract-engineer (runs in parallel with qa-fuzzer) |
 | auditor | Manual checklist + economic review + report, severity via impact×likelihood | qa-fuzzer AND static-analyst |
 | fix-reviewer | Re-checks patches after findings are addressed | auditor (activates later, not part of the initial pass) |
+
+**Models:** name one in each spawn prompt, or the teammate runs on the lead's model. Use `opus` for architect, contract-engineer, qa-fuzzer, auditor and fix-reviewer: they make the security judgments, write the security-critical code, or decide which invariants to test. Use `sonnet` for static-analyst, which runs tools and triages their output; the auditor re-checks what it reports. The user's choice wins.
 
 ## Spawn pattern — Claude Code with Agent Teams enabled
 

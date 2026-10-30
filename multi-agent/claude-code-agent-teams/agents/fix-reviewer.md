@@ -2,7 +2,7 @@
 name: fix-reviewer
 description: Re-reviews patched code after the team addresses audit findings, checking each fix actually closes the issue and didn't introduce a new one. Use after the initial audit report and once patches land, not during the first pass.
 tools: Read, Write, Bash, Grep, Glob
-model: inherit
+model: opus
 color: orange
 ---
 

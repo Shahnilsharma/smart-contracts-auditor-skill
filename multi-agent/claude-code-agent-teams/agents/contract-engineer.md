@@ -2,7 +2,7 @@
 name: contract-engineer
 description: Writes the contract/program source against the architect's threat model and architecture doc, following the chain's coding standards. Use once the architect teammate has produced its output.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: inherit
+model: opus
 color: green
 ---
 

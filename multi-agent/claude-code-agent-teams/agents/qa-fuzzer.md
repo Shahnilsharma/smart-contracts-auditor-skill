@@ -2,7 +2,7 @@
 name: qa-fuzzer
 description: Writes and runs the unit, fuzz, and invariant test suites (and the role-based QA runner) once the contract-engineer's code exists. Runs in parallel with static-analyst.
 tools: Read, Write, Edit, Bash, Grep, Glob
-model: inherit
+model: opus
 color: yellow
 ---
 

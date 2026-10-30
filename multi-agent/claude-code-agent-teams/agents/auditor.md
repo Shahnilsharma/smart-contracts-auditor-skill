@@ -2,7 +2,7 @@
 name: auditor
 description: Runs the manual audit checklist and economic/game-theoretic review, and writes the final audit report. Waits for both qa-fuzzer and static-analyst to finish.
 tools: Read, Write, Grep, Glob, WebSearch
-model: inherit
+model: opus
 effort: high
 color: red
 ---
