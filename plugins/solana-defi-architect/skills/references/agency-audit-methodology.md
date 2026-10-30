@@ -42,6 +42,12 @@ Trail of Bits' stated principle: **audit the architecture before the bytecode**.
   - KelpDAO (Apr 2026, ~$292M): a bridge configured with a single verifier accepted a forged cross-chain message.
   
   What to check: privileged actions that can move value (new collateral or market listings, oracle and risk-parameter changes, withdrawal-limit changes, upgrades) sit behind a timelock; anything an off-chain key authorizes is bounded by on-chain caps and rate limits; bridge/messaging verification needs more than one independent verifier; the signing process (hardware wallets, independently decoded calldata, no blind signing) is documented. File gaps as findings.
+- **Lineage and incident history** (needs web access; ask before skipping it, and if it can't run, mark it `NOT EXECUTED` in the ledger and say so in the report):
+  1. Find out what the code is forked or adapted from: crate/package names, licence and copyright headers, README credits, git history, contract and message names that match a known protocol. Record the parent repo and the fork commit or tag.
+  2. Collect the parent's public audit reports and check every finding in them against this code. A fork inherits the parent's bugs and usually skips its later fixes.
+  3. Diff the parent upstream from the fork point to its latest release. List every security fix, advisory and fix-shaped commit or changelog entry, and check whether each one is present here.
+  4. Search incidents and post-mortems: the parent protocol, other forks of it, and protocols of the same type on any chain (lending, AMM, perps, liquid staking…). Useful sources: rekt.news, the DeFiLlama hacks list, the chain's security advisories, and audit-finding aggregators such as Solodit.
+  5. Turn each relevant incident into a threat-model row and a check with a cited source. Don't report an incident as a finding unless the code here is actually exposed to it.
 - Output of this phase: a written threat model + risk matrix, reviewed with the team *before* deep code review starts, so review time is spent where the actual risk is.
 
 ## Phase 2 — Automated analysis (baseline, not the finish line)
@@ -100,12 +106,13 @@ Do this unprompted, before the final report — don't wait for the client to ask
 4. Recount every number in the report (findings per severity, test counts, coverage, tool result counts) from the run ledger and the files, not from memory of earlier runs.
 5. Confirm every cited `file:line` still points at the code described and every referenced path exists.
 6. Re-rate each finding's severity now that its PoC exists.
+7. Confirm the lineage and incident-history research from Phase 1 ran, and that every upstream fix and relevant incident on its list has a stated result (present, absent and filed as a finding, or not applicable).
 
 Record what this pass found and fixed in a short appendix, so a reader can see it happened.
 
 ## Phase 7 — Report
 
-Structure: scope & methodology recap, executive summary, findings (each: title, **severity from the Phase-1-style impact×likelihood matrix**, location, description, proof-of-concept/exploit scenario where applicable, recommended fix), then a scope/assumptions section stating what was explicitly excluded (per Phase 0) so readers don't mistake "not found" for "checked and safe" on out-of-scope material. Never assign severity from impact alone — state the likelihood reasoning too, so a reader can disagree with a specific input rather than the whole rating.
+Structure: scope & methodology recap, executive summary, findings (each: title, **severity from the Phase-1-style impact×likelihood matrix**, location, description, proof-of-concept/exploit scenario where applicable, recommended fix), a lineage and historical-incidents section (parent protocol and fork point, upstream fixes checked, incidents checked, with sources; or a plain statement that this research wasn't done), then a scope/assumptions section stating what was explicitly excluded (per Phase 0) so readers don't mistake "not found" for "checked and safe" on out-of-scope material. Never assign severity from impact alone — state the likelihood reasoning too, so a reader can disagree with a specific input rather than the whole rating.
 
 ## Phase 8 — Fix review / re-audit cycle
 

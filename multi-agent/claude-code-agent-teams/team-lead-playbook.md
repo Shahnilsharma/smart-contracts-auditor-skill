@@ -38,7 +38,7 @@ The user only has to say "audit this with a team". The lead works out the rest; 
 **Lead** (the session the user is talking to):
 1. Phase 0 scope as usual, including "Prepared by" and report format, plus chain, contract addresses and deployed commit if the code is live.
 2. List every in-scope contract and write `audit-out/contract-map.md`: who calls whom, who holds funds, the admin/owner/upgrade authority of each contract, shared state.
-3. Write one system-wide threat model (Phase 1) over that map.
+3. Write one system-wide threat model (Phase 1) over that map, including the lineage and incident-history research. Give each auditor the upstream fixes and incidents that touch its group.
 4. Build the whole workspace once with the release build. If it's deployed, compare each on-chain code hash with that build. A mismatch blocks that contract's audit until the deployed commit is found.
 5. Run the fast static tools once over the whole workspace, not once per teammate.
 6. Size the team, split the contracts (below), spawn the auditors, keep `audit-out/STATUS.md`.
