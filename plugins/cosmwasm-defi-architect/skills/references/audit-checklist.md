@@ -127,6 +127,7 @@ Go through every item against actual code lines — cite the branch checked, not
 - Emergency pause exists for fund-moving contracts, and pause doesn't lock user withdrawals of already-owned funds.
 
 ## Input validation
+- Every function that changes something's status (approve/revoke, add/remove, open/close, cancel, claim, pause/unpause) first checks the current status: the item exists and isn't already in the target state. Events fire only on a real change, because indexers, monitors and dashboards trust them. Sibling functions on the same item check the same things; if `reassign` checks existence and `revoke` doesn't, that difference is the bug.
 - No `unwrap()`/`expect()`/`panic!` reachable from user input — all fallible ops return `ContractError`.
 - String/Addr inputs validated (`deps.api.addr_validate`) before storage or use as key, and the returned `Addr` is what's stored and compared, never the raw string. The same address in different letter case or prefix must map to one key: Halborn's disclosure covering 20+ CosmWasm chains (fixed in the host's `addr_validate`) showed upper-case Bech32 strings bypassing blocklists, creating duplicate pools and permanently locking CW20s sent to them. Oak Security spotlight #3 covers the same class. Check the chain's host is patched, and don't assume lower case in contract code.
 - Boundary values tested: 0, 1, max `Uint128`, empty vecs/strings.

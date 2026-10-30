@@ -61,6 +61,7 @@ Use the chain-specific `audit-checklist.md` in this skill. Every item needs a st
 - Cross-contract/cross-program/cross-chain composability (a function safe in isolation can be unsafe combined with another protocol's callback, hook, or a bridge message).
 - Governance and upgrade-path safety (who can change what, how fast, with what checks).
 - Rounding/precision direction and who it favors.
+- **State-transition table.** For each thing with a lifecycle (an approved address or role entry, order, position, loan, proposal, pool, vesting schedule), list its states and every function that changes them. For each function, try each starting state: never existed, active, already in the target state, closed. Mark each cell allowed, reverts, or no-op. A cell that should revert but doesn't is a finding. Severity depends on side effects: an owner-only no-op that only emits a misleading event is Informational, but the same gap with a refund, payout, counter or fee attached (cancelling an order that doesn't exist, claiming twice, decrementing a count for an entry that was never added) can be High.
 
 ## Phase 4 — Dynamic testing (fuzzing / invariant testing)
 
@@ -68,6 +69,7 @@ Use this skill's testing reference for the chain-specific tools (Foundry fuzz+in
 
 **A test that can't fail proves nothing.** For every security test, ask: would it still pass if the guard or fix were removed?
 - Negative tests (access control, input validation) assert the *specific* error — the exact custom error/selector, role-check message or revert reason — never "any revert". Otherwise a missing guard that reverts for an unrelated reason (wrong state, arithmetic, missing approval) still passes.
+- Negative tests cover wrong *state*, not only wrong caller and bad input: act on an item that never existed, act twice (revoke twice, claim twice, cancel twice), and act after close. Each row of the Phase 3 state-transition table that should revert gets a test asserting the specific error.
 - "Must not revert" properties are written so that a revert fails the check (e.g. `try`/`catch` with `assert(false)` in the catch arm). Symbolic tools in particular treat a reverting path as "no counterexample".
 - Fuzz properties with several branches measure how often each branch ran; a branch the fuzzer never hits is untested.
 - Invariant campaigns report per-handler call counts; a handler that never succeeds gets fixed before the invariant is cited as evidence.

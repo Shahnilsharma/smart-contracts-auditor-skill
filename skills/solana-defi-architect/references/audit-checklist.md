@@ -51,6 +51,7 @@ Solana's account model makes its vulnerability classes different from EVM's — 
 - Sysvars accessed via Anchor's typed `Sysvar<'info, T>` (validates the sysvar's well-known address) or, in native code, the account address explicitly checked against the expected sysvar pubkey — not trusted from an `AccountInfo` without validation.
 
 ## Reinitialization / account lifecycle
+- Every function that changes something's status (approve/revoke, add/remove, open/close, cancel, claim, pause/unpause) first checks the current status: the item exists and isn't already in the target state. Events fire only on a real change, because indexers, monitors and dashboards trust them. Sibling functions on the same item check the same things; if `reassign` checks existence and `revoke` doesn't, that difference is the bug.
 - `init` (Anchor) used for account creation, not a manual "first-write" check that could be bypassed or raced.
 - The instruction that sets the protocol's admin or global config on first initialization can only be called by the program's upgrade authority or a hard-coded key. Otherwise whoever calls it first becomes admin — reported as the cause of a ~$1.1M loss on a Solana card-collateral program in 2026.
 - Account closing uses `close = destination` (zeroes data + drains lamports atomically) — no hand-rolled close that leaves the account revivable within the same transaction by re-crediting lamports before it's garbage-collected.

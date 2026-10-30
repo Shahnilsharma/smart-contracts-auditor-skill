@@ -15,6 +15,7 @@ OWASP Smart Contract Top 10 (2026, current — the 2026 list restructured from 2
 - Fee/interest/reward calculations match the spec exactly — trace one worked example by hand against the code.
 - Rounding direction always favors the protocol, not the caller, and is documented.
 - State transitions match the intended state machine — no way to skip/reorder required steps.
+- Every function that changes something's status (approve/revoke, add/remove, open/close, cancel, claim, pause/unpause) first checks the current status: the item exists and isn't already in the target state. Events fire only on a real change, because indexers, monitors and dashboards trust them. Sibling functions on the same item check the same things; if `reassign` checks existence and `revoke` doesn't, that difference is the bug.
 
 ## Reentrancy
 - Checks-effects-interactions ordering on every function with an external call.
